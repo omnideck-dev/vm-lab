@@ -9,9 +9,25 @@ Before rebuilding a guest, record:
 - `qemu-img info --backing-chain` output;
 - post-build `lab.sh verify` output and image SHA-256.
 
+The upstream base filename, digest algorithm/value, and signed verification
+record are declared per VM in `lab-manifest.json`. Strict doctor validates that
+binding; deep doctor also re-hashes the local multi-gigabyte base images.
+
 Keep those fields in a machine-readable manifest beside the clean golden. Base
 image checksum files and verified markers remain in `base-images/`; `doctor`
 must be clean before a rebuilt image is accepted.
+
+Capture the controller-owned manifest immediately after accepting a baseline:
+
+```sh
+./lab.sh provenance capture appimage clean
+./lab.sh provenance capture appimage desktop-e2e-v2
+./lab.sh doctor --strict
+```
+
+`doctor --deep` additionally re-hashes the clean golden disks. Run it after a
+rebuild or suspected storage corruption; routine consumers use `--strict` and
+validate the recorded manifest without paying that hashing cost.
 
 Build through a dedicated lease, save a new named checkpoint first, boot and
 verify it after a reset, and only then schedule clean-golden replacement. Never

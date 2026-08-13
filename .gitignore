@@ -1,5 +1,6 @@
 # The repository contains controller source only. Never commit deployed lab data.
 artifacts/
+cache/
 base-images/
 discarded/
 disks/

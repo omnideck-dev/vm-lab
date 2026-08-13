@@ -17,7 +17,7 @@ SWTPM_ROOT="$LAB_ROOT/tools/swtpm-root"
 SWTPM_BIN="$SWTPM_ROOT/usr/bin/swtpm"
 SWTPM_LIB="$SWTPM_ROOT/usr/lib/x86_64-linux-gnu"
 ALL_VMS=(appimage deb rpm atomic windows)
-LAB_ENGINE_VERSION="2.0.0"
+LAB_ENGINE_VERSION="$(<"$LAB_ROOT/VERSION")"
 
 usage() {
   cat <<'USAGE'

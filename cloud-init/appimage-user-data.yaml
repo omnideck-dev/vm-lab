@@ -1,0 +1,48 @@
+#cloud-config
+hostname: omnideck-appimage
+manage_etc_hosts: true
+timezone: America/Chicago
+
+users:
+  - name: tester
+    gecos: OmniDeck Release Tester
+    groups: [adm, sudo]
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    shell: /bin/bash
+    lock_passwd: false
+    # Use the explicit lab password here. Ubuntu's cloud image produced a
+    # different, unusable GDM password from the hash-only passwd entry.
+    plain_text_passwd: "omnideck-test"
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBtgEDHDtGv8c9hkTV4D2U1RuLha5n1YvfqxlTd5tAqv omnideck-release-lab
+
+ssh_pwauth: false
+disable_root: true
+package_update: true
+package_upgrade: true
+packages:
+  - ubuntu-desktop-minimal
+  - spice-vdagent
+  - qemu-guest-agent
+  - openssh-server
+  - policykit-1
+  - curl
+  - jq
+  - ca-certificates
+  - xdg-utils
+
+runcmd:
+  - [bash, -lc, "apt-get remove -y podman || true"]
+  - [bash, -lc, "install -d -o tester -g tester /home/tester/.config && touch /home/tester/.config/gnome-initial-setup-done && chown tester:tester /home/tester/.config/gnome-initial-setup-done"]
+  - [systemctl, set-default, graphical.target]
+  - [systemctl, enable, gdm3]
+  - [systemctl, enable, ssh]
+  - [systemctl, enable, qemu-guest-agent]
+  - [touch, /var/lib/omnideck-lab-ready]
+
+power_state:
+  mode: reboot
+  timeout: 30
+  condition: true
+
+final_message: "OmniDeck AppImage guest provisioning complete"

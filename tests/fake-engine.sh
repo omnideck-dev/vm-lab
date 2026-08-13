@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+fake_root="$(cd "$(dirname "$0")" && pwd)"
+
 case "$1" in
   status)
     case "$2" in
@@ -13,5 +15,6 @@ case "$1" in
     esac
     ;;
   snapshots) printf 'appimage snapshots:\nclean\ndesktop-e2e-v2\npodman-ready\n' ;;
+  stop|reset) printf '%s\n' "$*" >> "$fake_root/runtime/fake-actions.log" ;;
   *) printf 'engine %s\n' "$*" ;;
 esac

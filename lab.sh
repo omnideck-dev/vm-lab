@@ -9,9 +9,12 @@ LEASE_DIR="$RUNTIME_DIR/leases"
 DISCARDED_DIR="$LAB_ROOT/discarded"
 TRANSACTION_ROOT="$DISCARDED_DIR/runs"
 ARTIFACT_ROOT="$LAB_ROOT/artifacts"
+CACHE_ROOT="$LAB_ROOT/cache"
 LOG_DIR="$LAB_ROOT/logs"
-LAB_VERSION="2.0.0"
+MANIFEST="$LAB_ROOT/lab-manifest.json"
+LAB_VERSION="$(<"$LAB_ROOT/VERSION")"
 DEFAULT_RETENTION_HOURS="${OMNIDECK_VM_LAB_RETENTION_HOURS:-48}"
+DEFAULT_CACHE_RETENTION_HOURS="${OMNIDECK_VM_LAB_CACHE_RETENTION_HOURS:-168}"
 ALL_VMS=(appimage deb rpm atomic windows)
 
 usage() {
@@ -24,6 +27,12 @@ Ownership and lifecycle:
   describe VM [--shell|--json]
   inventory [--json]
   baseline VM cli|desktop
+  profile PROFILE VM
+  capabilities [--json]
+  paths [--shell|--json]
+  artifact-path OWNER SUITE RUN_ID
+  cache-path OWNER KEY
+  preflight SUITE PROFILE [--lanes CSV] [--json]
 
 Guest commands (must run inside `lease`):
   init [VM]              Initialize one or all guests
@@ -48,7 +57,11 @@ Snapshots and maintenance:
   checkpoint adopt VM NAME
   checkpoint delete VM NAME
   doctor
-  gc [--dry-run|--apply] [--retention-hours N] [--all-evidence]
+  doctor [--strict|--deep]
+  provenance capture VM [NAME]
+  gc [--dry-run|--apply] [--retention-hours N] [--cache-retention-hours N]
+     [--all-evidence|--all-generated --yes]
+  cleanup [--dry-run|--apply]
   runs list
   runs inspect|pin|unpin|purge PATH [--yes]
 
@@ -92,7 +105,7 @@ validate_identifier() {
 }
 
 ensure_layout() {
-  mkdir -p "$LEASE_DIR" "$TRANSACTION_ROOT" "$ARTIFACT_ROOT" "$LOG_DIR"
+  mkdir -p "$LEASE_DIR" "$TRANSACTION_ROOT" "$ARTIFACT_ROOT" "$CACHE_ROOT" "$LOG_DIR"
 }
 
 lease_file_for() {
@@ -202,20 +215,24 @@ PY
 lease_command() {
   local requested_vm="${1:?VM is required}" owner="${2:?OWNER is required}"
   shift 2
-  local vm run_id keep_state=0
+  local vm run_id="" keep_state=0 cleanup_baseline="" lease_signal=""
   vm="$(canonical_vm "$requested_vm")"
   validate_identifier owner "$owner"
-  if [[ "${1:-}" != "--" && "${1:-}" != "--keep-state" ]]; then
+  if [[ "${1:-}" != "--" && "${1:-}" != --* ]]; then
     run_id="$1"
     shift
-  else
+  fi
+  if [[ -z "$run_id" ]]; then
     run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
   fi
   validate_identifier run-id "$run_id"
-  if [[ "${1:-}" == "--keep-state" ]]; then
-    keep_state=1
-    shift
-  fi
+  while [[ "${1:-}" != "--" && -n "${1:-}" ]]; do
+    case "$1" in
+      --keep-state) keep_state=1; shift ;;
+      --cleanup-baseline) cleanup_baseline="${2:?value required}"; validate_identifier cleanup-baseline "$cleanup_baseline"; shift 2 ;;
+      *) printf 'Unknown lease option: %s\n' "$1" >&2; exit 2 ;;
+    esac
+  done
   [[ "${1:-}" == "--" ]] || { printf 'lease requires -- before COMMAND.\n' >&2; exit 2; }
   shift
   (($#)) || { printf 'lease requires COMMAND.\n' >&2; exit 2; }
@@ -250,10 +267,25 @@ lease_command() {
   export OMNIDECK_VM_LAB_LEASE_TOKEN="$token"
   export OMNIDECK_VM_LAB_TRANSACTION_DIR="$transaction_dir"
 
+  trap 'lease_signal=INT' INT
+  trap 'lease_signal=TERM' TERM
+  trap 'lease_signal=HUP' HUP
   set +e
   "$@"
   result=$?
   set -e
+  trap - INT TERM HUP
+  if [[ -n "$lease_signal" && "$result" == 0 ]]; then
+    case "$lease_signal" in INT) result=130 ;; TERM) result=143 ;; HUP) result=129 ;; esac
+  fi
+  if [[ -n "$cleanup_baseline" && "$result" -ge 128 ]]; then
+    if "$ENGINE" status "$vm" | grep -Eq "^${vm} running "; then
+      "$ENGINE" stop "$vm" || result=1
+    fi
+    if [[ "$keep_state" == 0 ]]; then
+      "$ENGINE" reset "$vm" "$cleanup_baseline" || result=1
+    fi
+  fi
   expires_at="$(( $(date +%s) + DEFAULT_RETENTION_HOURS * 3600 ))"
   if [[ "$result" == 0 && "$keep_state" == 0 ]]; then
     rm -rf -- "$transaction_dir"
@@ -401,7 +433,7 @@ baseline_command() {
         return
       fi
       for candidate in desktop-e2e-v2 podman-ready clean; do
-        if "$ENGINE" snapshots "$vm" | grep -Fxq "$candidate"; then
+        if "$ENGINE" snapshots "$vm" | grep -Fx "$candidate" >/dev/null; then
           printf '%s\n' "$candidate"
           return
         fi
@@ -411,6 +443,244 @@ baseline_command() {
       ;;
     *) printf 'Unknown suite: %s\n' "$suite" >&2; return 2 ;;
   esac
+}
+
+profile_command() {
+  local profile="${1:?PROFILE is required}" vm
+  vm="$(canonical_vm "${2:?VM is required}")"
+  [[ -f "$MANIFEST" ]] || { printf 'Missing lab manifest: %s\n' "$MANIFEST" >&2; return 1; }
+  python3 - "$MANIFEST" "$profile" "$vm" <<'PY'
+import json, sys
+path, profile, vm = sys.argv[1:]
+with open(path) as handle:
+    manifest = json.load(handle)
+try:
+    print(manifest["profiles"][profile][vm])
+except KeyError:
+    raise SystemExit(f"Unknown profile or VM mapping: {profile}/{vm}")
+PY
+}
+
+capabilities_command() {
+  local format="${1:---json}"
+  case "$format" in
+    --json)
+      printf '{"schemaVersion":1,"controllerApi":2,"labVersion":"%s","features":["artifact-path","cache-path","capabilities","cleanup","evidence-v1","lease-cleanup","paths","preflight","profiles","provenance","strict-doctor"]}\n' "$LAB_VERSION"
+      ;;
+    --text)
+      printf '%s\n' artifact-path cache-path capabilities cleanup evidence-v1 lease-cleanup paths preflight profiles provenance strict-doctor
+      ;;
+    *) printf 'Unknown capabilities format: %s\n' "$format" >&2; return 2 ;;
+  esac
+}
+
+paths_command() {
+  local format="${1:---shell}"
+  case "$format" in
+    --shell)
+      printf 'OMNIDECK_VM_LAB_ARTIFACT_ROOT=%q\n' "$ARTIFACT_ROOT"
+      printf 'OMNIDECK_VM_LAB_CACHE_ROOT=%q\n' "$CACHE_ROOT"
+      printf 'OMNIDECK_VM_LAB_TRANSACTION_ROOT=%q\n' "$TRANSACTION_ROOT"
+      ;;
+    --json)
+      python3 - "$ARTIFACT_ROOT" "$CACHE_ROOT" "$TRANSACTION_ROOT" <<'PY'
+import json, sys
+print(json.dumps({
+    "schemaVersion": 1,
+    "artifactRoot": sys.argv[1],
+    "cacheRoot": sys.argv[2],
+    "transactionRoot": sys.argv[3],
+}, sort_keys=True))
+PY
+      ;;
+    *) printf 'Unknown paths format: %s\n' "$format" >&2; return 2 ;;
+  esac
+}
+
+artifact_path_command() {
+  local owner="${1:?OWNER is required}" suite="${2:?SUITE is required}" run_id="${3:?RUN_ID is required}"
+  validate_identifier owner "$owner"
+  validate_identifier suite "$suite"
+  validate_identifier run-id "$run_id"
+  printf '%s/%s/%s/%s\n' "$ARTIFACT_ROOT" "$owner" "$suite" "$run_id"
+}
+
+cache_path_command() {
+  local owner="${1:?OWNER is required}" key="${2:?KEY is required}"
+  validate_identifier owner "$owner"
+  validate_identifier cache-key "$key"
+  printf '%s/%s/%s\n' "$CACHE_ROOT" "$owner" "$key"
+}
+
+golden_paths() {
+  local vm="$1" name="$2"
+  if [[ "$name" == clean ]]; then
+    GOLDEN_CAPTURE_DISK="$LAB_ROOT/golden/${vm}-clean.qcow2"
+    GOLDEN_CAPTURE_VARS="$LAB_ROOT/golden/${vm}-clean-OVMF_VARS.fd"
+    GOLDEN_CAPTURE_TPM="$LAB_ROOT/golden/${vm}-clean-tpm"
+  else
+    GOLDEN_CAPTURE_DISK="$LAB_ROOT/golden/$vm/$name/disk.qcow2"
+    GOLDEN_CAPTURE_VARS="$LAB_ROOT/golden/$vm/$name/OVMF_VARS.fd"
+    GOLDEN_CAPTURE_TPM="$LAB_ROOT/golden/$vm/$name/tpm"
+  fi
+}
+
+tree_digest() {
+  local directory="$1"
+  if [[ ! -d "$directory" ]]; then
+    printf 'none\n'
+    return
+  fi
+  find "$directory" -type f -printf '%P\0' | sort -z | while IFS= read -r -d '' relative; do
+    printf '%s  %s\n' "$(sha256sum "$directory/$relative" | awk '{print $1}')" "$relative"
+  done | sha256sum | awk '{print $1}'
+}
+
+provenance_capture_one() {
+  local vm="$1" name="$2" destination disk_sha vars_sha tpm_sha
+  golden_paths "$vm" "$name"
+  [[ -f "$GOLDEN_CAPTURE_DISK" ]] || { printf 'Missing golden disk: %s\n' "$GOLDEN_CAPTURE_DISK" >&2; return 1; }
+  [[ -f "$GOLDEN_CAPTURE_VARS" ]] || { printf 'Missing golden UEFI state: %s\n' "$GOLDEN_CAPTURE_VARS" >&2; return 1; }
+  if [[ "$vm" == windows && ! -d "$GOLDEN_CAPTURE_TPM" ]]; then
+    printf 'Missing golden TPM state: %s\n' "$GOLDEN_CAPTURE_TPM" >&2
+    return 1
+  fi
+  printf 'Fingerprinting %s/%s (this can take several minutes)...\n' "$vm" "$name" >&2
+  disk_sha="$(sha256sum "$GOLDEN_CAPTURE_DISK" | awk '{print $1}')"
+  vars_sha="$(sha256sum "$GOLDEN_CAPTURE_VARS" | awk '{print $1}')"
+  tpm_sha="$(tree_digest "$GOLDEN_CAPTURE_TPM")"
+  mkdir -p "$LAB_ROOT/golden/manifests"
+  destination="$LAB_ROOT/golden/manifests/${vm}-${name}.json"
+  python3 - "$destination" "$vm" "$(distro_name "$vm")" "$name" "$disk_sha" "$vars_sha" "$tpm_sha" "$LAB_VERSION" "$MANIFEST" "$GOLDEN_CAPTURE_DISK" <<'PY'
+import datetime, hashlib, json, os, subprocess, sys, tempfile
+path, vm, distro, name, disk_sha, vars_sha, tpm_sha, version, config_path, disk_path = sys.argv[1:]
+config_sha = hashlib.sha256(open(config_path, "rb").read()).hexdigest() if os.path.exists(config_path) else None
+qemu_info = json.loads(subprocess.check_output(["qemu-img", "info", "--output=json", disk_path]))
+record = {
+    "schemaVersion": 1,
+    "vm": vm,
+    "distro": distro,
+    "baseline": name,
+    "capturedAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+    "provenance": "captured-current-state",
+    "controllerVersion": version,
+    "labManifestSha256": config_sha,
+    "diskSha256": disk_sha,
+    "uefiVarsSha256": vars_sha,
+    "tpmTreeSha256": tpm_sha,
+    "qemuImage": qemu_info,
+}
+fd, temporary = tempfile.mkstemp(prefix=".provenance.", dir=os.path.dirname(path), text=True)
+with os.fdopen(fd, "w") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+os.replace(temporary, path)
+PY
+  printf '%s\n' "$destination"
+}
+
+provenance_command() {
+  local action="${1:?ACTION is required}"
+  shift
+  case "$action" in
+    capture)
+      local requested="${1:?VM or --all is required}" name="${2:-clean}" vm
+      if [[ "$requested" == --all ]]; then
+        for vm in "${ALL_VMS[@]}"; do
+          [[ "$("$ENGINE" status "$vm")" == "${vm} stopped "* ]] || { printf '%s is running.\n' "$vm" >&2; return 1; }
+          lease_is_held "$vm" && { printf '%s is leased.\n' "$vm" >&2; return 1; }
+        done
+        for vm in "${ALL_VMS[@]}"; do provenance_capture_one "$vm" clean; done
+      else
+        vm="$(canonical_vm "$requested")"
+        [[ "$("$ENGINE" status "$vm")" == "${vm} stopped "* ]] || { printf '%s is running.\n' "$vm" >&2; return 1; }
+        lease_is_held "$vm" && { printf '%s is leased.\n' "$vm" >&2; return 1; }
+        provenance_capture_one "$vm" "$name"
+      fi
+      ;;
+    *) printf 'Unknown provenance action: %s\n' "$action" >&2; return 2 ;;
+  esac
+}
+
+provenance_metadata_valid() {
+  local path="$1" vm="$2" baseline="$3"
+  python3 - "$path" "$MANIFEST" "$vm" "$baseline" <<'PY'
+import hashlib, json, re, sys
+path, config_path, vm, baseline = sys.argv[1:]
+try:
+    with open(path) as handle:
+        record = json.load(handle)
+    with open(config_path, "rb") as handle:
+        config_sha = hashlib.sha256(handle.read()).hexdigest()
+    assert record["schemaVersion"] == 1
+    assert record["vm"] == vm
+    assert record["baseline"] == baseline
+    assert record["labManifestSha256"] == config_sha
+    assert re.fullmatch(r"[0-9a-f]{64}", record["diskSha256"])
+    assert re.fullmatch(r"[0-9a-f]{64}", record["uefiVarsSha256"])
+    assert record["tpmTreeSha256"] == "none" or re.fullmatch(r"[0-9a-f]{64}", record["tpmTreeSha256"])
+    assert isinstance(record["qemuImage"], dict)
+except (AssertionError, KeyError, OSError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+}
+
+preflight_command() {
+  local suite="${1:?SUITE is required}" profile="${2:?PROFILE is required}" lanes_csv="" baseline_override="" format=--text
+  shift 2
+  while (($#)); do
+    case "$1" in
+      --lanes) lanes_csv="${2:?value required}"; shift 2 ;;
+      --baseline) baseline_override="${2:?value required}"; validate_identifier baseline "$baseline_override"; shift 2 ;;
+      --json) format=--json; shift ;;
+      *) printf 'Unknown preflight argument: %s\n' "$1" >&2; return 2 ;;
+    esac
+  done
+  case "$suite" in cli|desktop) ;; *) printf 'Unknown suite: %s\n' "$suite" >&2; return 2 ;; esac
+  [[ -n "$lanes_csv" ]] || { if [[ "$suite" == cli ]]; then lanes_csv=appimage,deb,rpm,windows; else lanes_csv=appimage,deb,rpm,atomic,windows; fi; }
+  local -a lanes=()
+  IFS=',' read -r -a lanes <<<"$lanes_csv"
+  local temporary errors=0 requested vm baseline status manifest_path
+  temporary="$(mktemp "$RUNTIME_DIR/.preflight.XXXXXX")"
+  for requested in "${lanes[@]}"; do
+    vm="$(canonical_vm "$requested")" || { errors=$((errors + 1)); continue; }
+    if [[ -n "$baseline_override" ]]; then baseline="$baseline_override"; else baseline="$(profile_command "$profile" "$vm")" || { errors=$((errors + 1)); continue; }; fi
+    status="$("$ENGINE" status "$vm")"
+    manifest_path="$LAB_ROOT/golden/manifests/${vm}-${baseline}.json"
+    if [[ "$status" != "${vm} stopped "* ]]; then
+      printf '%s\t%s\t%s\trunning\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+      errors=$((errors + 1))
+    elif ! "$ENGINE" snapshots "$vm" | grep -Fx "$baseline" >/dev/null; then
+      printf '%s\t%s\t%s\tmissing-baseline\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+      errors=$((errors + 1))
+    elif [[ ! -f "$manifest_path" ]]; then
+      printf '%s\t%s\t%s\tmissing-provenance\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+      errors=$((errors + 1))
+    elif ! provenance_metadata_valid "$manifest_path" "$vm" "$baseline"; then
+      printf '%s\t%s\t%s\tinvalid-provenance\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+      errors=$((errors + 1))
+    else
+      printf '%s\t%s\t%s\tready\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+    fi
+  done
+  if [[ "$format" == --json ]]; then
+    python3 - "$suite" "$profile" "$lanes_csv" "$errors" "$temporary" <<'PY'
+import json, sys
+suite, profile, lanes, errors, path = sys.argv[1:]
+records = []
+with open(path) as handle:
+    for line in handle:
+        vm, distro, baseline, status, provenance = line.rstrip("\n").split("\t")
+        records.append({"vm": vm, "distro": distro, "baseline": baseline, "status": status, "provenance": provenance})
+print(json.dumps({"schemaVersion": 1, "suite": suite, "profile": profile, "lanes": lanes.split(","), "ready": int(errors) == 0, "results": records}, sort_keys=True))
+PY
+  else
+    printf 'vm\tdistro\tbaseline\tstatus\tprovenance\n'
+    cat "$temporary"
+    printf 'preflight summary: suite=%s profile=%s errors=%s\n' "$suite" "$profile" "$errors"
+  fi
+  unlink "$temporary"
+  ((errors == 0))
 }
 
 safe_artifact_dir() {
@@ -538,6 +808,8 @@ PY
 }
 
 doctor_command() {
+  local mode="${1:---standard}"
+  case "$mode" in --standard|--strict|--deep) ;; *) printf 'Unknown doctor mode: %s\n' "$mode" >&2; return 2 ;; esac
   ensure_layout
   local errors=0 warnings=0 dependency vm disk golden count size
   for dependency in bash flock python3 qemu-img qemu-system-x86_64 ssh scp; do
@@ -546,6 +818,13 @@ doctor_command() {
       errors=$((errors + 1))
     fi
   done
+  if [[ ! -f "$MANIFEST" ]]; then
+    printf 'ERROR missing declarative lab manifest: %s\n' "$MANIFEST"
+    errors=$((errors + 1))
+  elif ! python3 -m json.tool "$MANIFEST" >/dev/null 2>&1; then
+    printf 'ERROR invalid declarative lab manifest: %s\n' "$MANIFEST"
+    errors=$((errors + 1))
+  fi
   for vm in "${ALL_VMS[@]}"; do
     local basic_status
     basic_status="$("$ENGINE" status "$vm")"
@@ -561,7 +840,7 @@ doctor_command() {
       errors=$((errors + 1))
       continue
     fi
-    if [[ -f "$disk" ]] && ! qemu-img info --output=json "$disk" >/dev/null; then
+    if [[ "$basic_status" == "${vm} stopped "* && -f "$disk" ]] && ! qemu-img info --output=json "$disk" >/dev/null; then
       printf 'ERROR unreadable active disk: %s\n' "$disk"
       errors=$((errors + 1))
     fi
@@ -570,6 +849,109 @@ doctor_command() {
       errors=$((errors + 1))
     fi
   done
+  if [[ "$mode" == --strict || "$mode" == --deep ]]; then
+    local install_record="$LAB_ROOT/controller-install.json"
+    if [[ ! -f "$install_record" ]]; then
+      printf 'ERROR missing controller install provenance: %s\n' "$install_record"
+      errors=$((errors + 1))
+    elif ! python3 - "$LAB_ROOT" "$install_record" <<'PY'
+import hashlib, json, os, re, sys
+root, path = sys.argv[1:]
+try:
+    with open(path) as handle:
+        record = json.load(handle)
+    assert record["schemaVersion"] == 1
+    assert record["version"]
+    files = record["installedFilesSha256"]
+    assert files
+    for relative, expected in files.items():
+        assert not os.path.isabs(relative) and ".." not in relative.split(os.sep)
+        assert re.fullmatch(r"[0-9a-f]{64}", expected)
+        with open(os.path.join(root, relative), "rb") as handle:
+            assert hashlib.sha256(handle.read()).hexdigest() == expected
+except (AssertionError, KeyError, OSError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+    then
+      printf 'ERROR installed controller files differ from controller-install.json\n'
+      errors=$((errors + 1))
+    fi
+    if [[ -f "$MANIFEST" ]]; then
+      while IFS=$'\t' read -r vm dependency expected; do
+        local actual
+        if [[ ! -f "$LAB_ROOT/$dependency" ]]; then
+          printf 'ERROR %s provisioning input is missing: %s\n' "$vm" "$LAB_ROOT/$dependency"
+          errors=$((errors + 1))
+          continue
+        fi
+        actual="$(sha256sum "$LAB_ROOT/$dependency" | awk '{print $1}')"
+        if [[ "$actual" != "$expected" ]]; then
+          printf 'ERROR %s provisioning digest mismatch: %s\n' "$vm" "$dependency"
+          errors=$((errors + 1))
+        fi
+      done < <(python3 - "$MANIFEST" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    manifest = json.load(handle)
+for vm, spec in sorted(manifest["vms"].items()):
+    print(f"{vm}\t{spec['provisioning']}\t{spec['provisioningSha256']}")
+    if "unattend" in spec:
+        print(f"{vm}\t{spec['unattend']}\t{spec['unattendSha256']}")
+PY
+      )
+      while IFS=$'\t' read -r vm base upstream verification algorithm expected; do
+        if [[ ! -f "$LAB_ROOT/base-images/$base" ]]; then
+          printf 'ERROR %s base image is missing: %s\n' "$vm" "$base"
+          errors=$((errors + 1))
+        fi
+        if [[ ! -f "$LAB_ROOT/$verification" ]]; then
+          printf 'ERROR %s base verification record is missing: %s\n' "$vm" "$verification"
+          errors=$((errors + 1))
+        elif ! grep -F "$expected" "$LAB_ROOT/$verification" | grep -F "$upstream" >/dev/null; then
+          printf 'ERROR %s base verification record does not bind %s to its declared digest\n' "$vm" "$upstream"
+          errors=$((errors + 1))
+        fi
+        if [[ "$mode" == --deep && -f "$LAB_ROOT/base-images/$base" ]]; then
+          local actual_base
+          if [[ "$algorithm" == sha256 ]]; then
+            actual_base="$(sha256sum "$LAB_ROOT/base-images/$base" | awk '{print $1}')"
+          else
+            actual_base="$(sha512sum "$LAB_ROOT/base-images/$base" | awk '{print $1}')"
+          fi
+          if [[ "$actual_base" != "$expected" ]]; then
+            printf 'ERROR base-image digest mismatch: %s\n' "$vm"
+            errors=$((errors + 1))
+          fi
+        fi
+      done < <(python3 - "$MANIFEST" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    manifest = json.load(handle)
+for vm, spec in sorted(manifest["vms"].items()):
+    algorithm, digest = spec["baseImageDigest"].split(":", 1)
+    print(f"{vm}\t{spec['baseImage']}\t{spec['baseImageUpstreamName']}\t{spec['baseImageVerificationRecord']}\t{algorithm}\t{digest}")
+PY
+      )
+    fi
+    for vm in "${ALL_VMS[@]}"; do
+      local provenance="$LAB_ROOT/golden/manifests/${vm}-clean.json"
+      if [[ ! -f "$provenance" ]]; then
+        printf 'ERROR missing clean-golden provenance: %s\n' "$provenance"
+        errors=$((errors + 1))
+      elif ! provenance_metadata_valid "$provenance" "$vm" clean; then
+        printf 'ERROR invalid clean-golden provenance: %s\n' "$provenance"
+        errors=$((errors + 1))
+      elif [[ "$mode" == --deep ]]; then
+        local expected_disk actual_disk
+        expected_disk="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["diskSha256"])' "$provenance")"
+        actual_disk="$(sha256sum "$LAB_ROOT/golden/${vm}-clean.qcow2" | awk '{print $1}')"
+        if [[ "$expected_disk" != "$actual_disk" ]]; then
+          printf 'ERROR clean-golden digest mismatch: %s\n' "$vm"
+          errors=$((errors + 1))
+        fi
+      fi
+    done
+  fi
   for dependency in \
     "$LAB_ROOT/base-images/Fedora-Cloud-44-1.7-x86_64-CHECKSUM.verified" \
     "$LAB_ROOT/base-images/Fedora-Silverblue-44-1.7-x86_64-CHECKSUM.verified" \
@@ -597,22 +979,30 @@ doctor_command() {
     printf 'WARN less than 20 GiB free under %s.\n' "$LAB_ROOT"
     warnings=$((warnings + 1))
   fi
-  printf 'doctor summary: errors=%s warnings=%s labVersion=%s\n' "$errors" "$warnings" "$LAB_VERSION"
+  printf 'doctor summary: errors=%s warnings=%s labVersion=%s mode=%s\n' "$errors" "$warnings" "$LAB_VERSION" "${mode#--}"
   ((errors == 0))
 }
 
 gc_command() {
-  local apply=0 all_evidence=0 retention_hours="$DEFAULT_RETENTION_HOURS"
+  local apply=0 all_evidence=0 all_generated=0 confirmed=0 retention_hours="$DEFAULT_RETENTION_HOURS" cache_retention_hours="$DEFAULT_CACHE_RETENTION_HOURS"
   while (($#)); do
     case "$1" in
       --dry-run) apply=0; shift ;;
       --apply) apply=1; shift ;;
       --all-evidence) all_evidence=1; shift ;;
+      --all-generated) all_generated=1; shift ;;
+      --yes) confirmed=1; shift ;;
       --retention-hours) retention_hours="${2:?value required}"; shift 2 ;;
+      --cache-retention-hours) cache_retention_hours="${2:?value required}"; shift 2 ;;
       *) printf 'Unknown gc argument: %s\n' "$1" >&2; exit 2 ;;
     esac
   done
   [[ "$retention_hours" =~ ^[0-9]+$ ]] || { printf 'Retention hours must be numeric.\n' >&2; exit 2; }
+  [[ "$cache_retention_hours" =~ ^[0-9]+$ ]] || { printf 'Cache retention hours must be numeric.\n' >&2; exit 2; }
+  if ((apply && all_generated && ! confirmed)); then
+    printf 'Applying --all-generated requires --yes.\n' >&2
+    exit 2
+  fi
   ensure_layout
   if ((apply)); then
     local vm
@@ -623,9 +1013,13 @@ gc_command() {
       fi
     done
   fi
-  local cutoff_minutes=$((retention_hours * 60)) candidate
+  local cutoff_minutes=$((retention_hours * 60)) cache_cutoff_minutes=$((cache_retention_hours * 60)) candidate
   local -a candidates=()
-  if ((all_evidence)); then
+  if ((all_generated)); then
+    while IFS= read -r -d '' candidate; do candidates+=("$candidate"); done < <(find "$ARTIFACT_ROOT" -mindepth 1 -maxdepth 1 -print0)
+    while IFS= read -r -d '' candidate; do candidates+=("$candidate"); done < <(find "$DISCARDED_DIR" -mindepth 1 -maxdepth 1 -print0)
+    while IFS= read -r -d '' candidate; do candidates+=("$candidate"); done < <(find "$CACHE_ROOT" -mindepth 1 -maxdepth 1 -print0)
+  elif ((all_evidence)); then
     while IFS= read -r -d '' candidate; do candidates+=("$candidate"); done < <(find "$ARTIFACT_ROOT" -mindepth 1 -maxdepth 1 -print0)
     while IFS= read -r -d '' candidate; do candidates+=("$candidate"); done < <(find "$DISCARDED_DIR" -mindepth 1 -maxdepth 1 -print0)
   else
@@ -640,14 +1034,17 @@ gc_command() {
       run_directory="$(dirname "$candidate")"
       [[ -f "$run_directory/.pin" ]] || candidates+=("$run_directory")
     done < <(find "$ARTIFACT_ROOT" -type f -name run.json -mmin "+$cutoff_minutes" -print0 2>/dev/null)
+    while IFS= read -r -d '' candidate; do
+      [[ -f "$candidate/.pin" ]] || candidates+=("$candidate")
+    done < <(find "$CACHE_ROOT" -mindepth 2 -maxdepth 2 -type d -mmin "+$cache_cutoff_minutes" -print0 2>/dev/null)
   fi
   if ((${#candidates[@]} == 0)); then
     printf 'GC found nothing eligible (retention=%sh).\n' "$retention_hours"
   else
-    printf 'GC candidates (apply=%s retention=%sh):\n' "$apply" "$retention_hours"
+    printf 'GC candidates (apply=%s artifactRetention=%sh cacheRetention=%sh):\n' "$apply" "$retention_hours" "$cache_retention_hours"
     printf '%s\n' "${candidates[@]}" | sort -u | while IFS= read -r candidate; do
       case "$candidate" in
-        "$ARTIFACT_ROOT"/*|"$DISCARDED_DIR"/*) ;;
+        "$ARTIFACT_ROOT"/*|"$DISCARDED_DIR"/*|"$CACHE_ROOT"/*) ;;
         *) printf 'Refusing unsafe GC candidate: %s\n' "$candidate" >&2; exit 2 ;;
       esac
       du -sh -- "$candidate" 2>/dev/null || printf 'missing\t%s\n' "$candidate"
@@ -719,8 +1116,16 @@ case "$command" in
   describe) describe_vm "${2:?VM is required}" "${3:---shell}" ;;
   inventory) inventory_command "${2:---text}" ;;
   baseline) baseline_command "${2:?VM is required}" "${3:?SUITE is required}" ;;
-  doctor) doctor_command ;;
+  profile) profile_command "${2:?PROFILE is required}" "${3:?VM is required}" ;;
+  capabilities) capabilities_command "${2:---json}" ;;
+  paths) paths_command "${2:---shell}" ;;
+  artifact-path) artifact_path_command "${2:?OWNER is required}" "${3:?SUITE is required}" "${4:?RUN_ID is required}" ;;
+  cache-path) cache_path_command "${2:?OWNER is required}" "${3:?KEY is required}" ;;
+  preflight) shift; preflight_command "$@" ;;
+  provenance) shift; provenance_command "$@" ;;
+  doctor) doctor_command "${2:---standard}" ;;
   gc) shift; gc_command "$@" ;;
+  cleanup) shift; gc_command "$@" ;;
   runs) shift; runs_command "$@" ;;
   evidence-init) shift; evidence_init "$@" ;;
   evidence-set) shift; evidence_set "$@" ;;

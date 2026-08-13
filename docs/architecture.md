@@ -1,10 +1,11 @@
 # Architecture and ownership
 
-The lab has three storage classes:
+The lab separates durable inputs and generated data:
 
 - `base-images/` and `golden/` are durable, reviewed inputs.
 - `disks/`, `runtime/`, and `logs/` are current machine state.
-- `discarded/runs/` and `artifacts/` are short-lived run output.
+- `artifacts/`, `cache/`, and `discarded/runs/` are the generated evidence,
+  immutable prepared inputs, and retained reset state.
 
 `lab.sh` is the only public controller. `lab-engine.sh` contains QEMU-specific
 mechanics and is not called directly by operators or consumer scripts.
@@ -41,3 +42,17 @@ before/after comparisons and pairs Windows disk and TPM state transactionally.
 The complete five-lane configuration requests 34 GiB of guest RAM and 20
 virtual CPUs. Run only the lanes required by the current matrix. `status` shows
 ownership, while `doctor` reports health and low-space conditions.
+
+## Controller contract
+
+`lab-manifest.json` versions the VM resources, provisioning inputs and hashes,
+storage policy, and deterministic profiles. `install.sh` copies that contract
+and writes `controller-install.json` with the source commit, dirty state, and
+SHA-256 of every installed controller/provisioning file. Consumers require
+controller 2.1 capabilities and call `preflight`
+before doing expensive work or acquiring a guest.
+
+`release-clean` always resolves every lane to `clean`. `dev-fast` resolves to
+the declared named checkpoint or clean baseline; it never silently falls back.
+Every accepted clean or named baseline has a SHA-256 provenance manifest under
+`golden/manifests/`.
