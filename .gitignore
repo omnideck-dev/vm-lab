@@ -1,0 +1,22 @@
+# The repository contains controller source only. Never commit deployed lab data.
+artifacts/
+base-images/
+discarded/
+disks/
+golden/
+keys/
+logs/
+runtime/
+seeds/
+tmp/
+worktrees/
+
+*.img
+*.iso
+*.qcow2
+*.raw
+*.fd
+id_ed25519
+id_ed25519.pub
+__pycache__/
+*.py[cod]
