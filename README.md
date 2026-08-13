@@ -21,13 +21,12 @@ must execute under one lab-owned lease:
 cd "$OMNIDECK_VM_LAB_DIR"
 ./lab.sh doctor --strict
 ./lab.sh preflight cli release-clean --lanes appimage,deb,rpm,windows
-./lab.sh lease ubuntu manual -- bash
+./lab.sh lease ubuntu manual --cleanup-baseline clean -- bash
 ./lab.sh start ubuntu
 ./lab.sh wait ubuntu
 ./lab.sh verify ubuntu
 ./lab.sh viewer ubuntu
-./lab.sh stop ubuntu
-./lab.sh reset ubuntu clean
+# Exit after the test; the lease restores the clean baseline even on interruption.
 exit
 ```
 
