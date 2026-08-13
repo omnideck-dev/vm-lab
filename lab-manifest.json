@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "controllerApi": 2,
+  "generatedStorage": {
+    "artifactRetentionHours": 48,
+    "cacheRetentionHours": 168,
+    "roots": {
+      "artifacts": "artifacts",
+      "cache": "cache",
+      "transactions": "discarded/runs"
+    }
+  },
+  "profiles": {
+    "dev-fast": {
+      "appimage": "desktop-e2e-v2",
+      "atomic": "clean",
+      "deb": "clean",
+      "rpm": "desktop-e2e-v2",
+      "windows": "podman-ready"
+    },
+    "release-clean": {
+      "appimage": "clean",
+      "atomic": "clean",
+      "deb": "clean",
+      "rpm": "clean",
+      "windows": "clean"
+    }
+  },
+  "vms": {
+    "appimage": {
+      "aliases": ["ubuntu"],
+      "baseImage": "noble-server-cloudimg-amd64.img",
+      "baseImageDigest": "sha256:0533b0655c32e68b31d792ecd6ccfca95abdbc536c4446874fe0513bd4140ffe",
+      "baseImageUpstreamName": "noble-server-cloudimg-amd64.img",
+      "baseImageVerificationRecord": "base-images/ubuntu-noble-SHA256SUMS",
+      "diskGiB": 50,
+      "distro": "ubuntu",
+      "memoryMiB": 6144,
+      "provisioning": "cloud-init/appimage-user-data.yaml",
+      "provisioningSha256": "fffaf2af8d48b0688758bdead3376c5299299482219eb326ee8e8fb34eb6906e",
+      "spicePort": 5931,
+      "sshPort": 2221
+    },
+    "deb": {
+      "aliases": ["debian"],
+      "baseImage": "debian-13-genericcloud-amd64.qcow2",
+      "baseImageDigest": "sha512:769562604ecaac26b661167891ef922f71f4d87d50a11423fc04e51444fda0d882c87996dd1181170d233627f4728e6722db2695c0ef753dad762c4ac4ed32e1",
+      "baseImageUpstreamName": "debian-13-genericcloud-amd64.qcow2",
+      "baseImageVerificationRecord": "base-images/debian-trixie-SHA512SUMS",
+      "diskGiB": 50,
+      "distro": "debian",
+      "memoryMiB": 6144,
+      "provisioning": "cloud-init/deb-user-data.yaml",
+      "provisioningSha256": "e6ece57161544c34d71a95ad91645546c73f233e8d0e300277fe3dee324cfa44",
+      "spicePort": 5932,
+      "sshPort": 2222
+    },
+    "rpm": {
+      "aliases": ["fedora"],
+      "baseImage": "Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2",
+      "baseImageDigest": "sha256:28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f",
+      "baseImageUpstreamName": "Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2",
+      "baseImageVerificationRecord": "base-images/Fedora-Cloud-44-1.7-x86_64-CHECKSUM.verified",
+      "diskGiB": 50,
+      "distro": "fedora",
+      "memoryMiB": 6144,
+      "provisioning": "cloud-init/rpm-user-data.yaml",
+      "provisioningSha256": "e20014b99b79c6fff203b287fffa55832bc4cbfd43abab441afab68b26f87a67",
+      "spicePort": 5933,
+      "sshPort": 2223
+    },
+    "atomic": {
+      "aliases": ["silverblue"],
+      "baseImage": "Fedora-Silverblue-ostree-x86_64-44-1.7.iso",
+      "baseImageDigest": "sha256:9ccec9b075a0a4358a7209b2667156aaeeec3a6a3c8d71cada45b57fca9b4682",
+      "baseImageUpstreamName": "Fedora-Silverblue-ostree-x86_64-44-1.7.iso",
+      "baseImageVerificationRecord": "base-images/Fedora-Silverblue-44-1.7-x86_64-CHECKSUM.verified",
+      "diskGiB": 60,
+      "distro": "silverblue",
+      "memoryMiB": 8192,
+      "provisioning": "automation/atomic.ks",
+      "provisioningSha256": "b01bd4c7fb05207bf4fc794e9159c690468bffd7d2be910377fec8425700bd51",
+      "spicePort": 5934,
+      "sshPort": 2224
+    },
+    "windows": {
+      "aliases": [],
+      "baseImage": "Win11_25H2_English_x64_v2.iso",
+      "baseImageDigest": "sha256:768984706b909479417b2368438909440f2967ff05c6a9195ed2667254e465e3",
+      "baseImageUpstreamName": "Win11_25H2_English_x64_v2.iso",
+      "baseImageVerificationRecord": "base-images/Win11_25H2_English_x64_v2-SHA256",
+      "diskGiB": 100,
+      "distro": "windows",
+      "memoryMiB": 8192,
+      "provisioning": "automation/windows/provision.ps1",
+      "provisioningSha256": "72961855738c056813968c145fa2508c714a71bf6e16d6c327e9b79e80956dc1",
+      "spicePort": 5935,
+      "sshPort": 2225,
+      "unattend": "automation/windows/Autounattend.xml",
+      "unattendSha256": "319eb2632078c67a431d72c27c80eb4ffed924b49c7e63c9632a1d72b4272784"
+    }
+  }
+}

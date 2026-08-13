@@ -2,6 +2,15 @@
 
 ## 2026-08-13
 
+- Added controller 2.1's declarative VM/provisioning manifest, install
+  provenance, strict/deep health checks, baseline fingerprints, deterministic
+  `dev-fast` and `release-clean` profiles, and a consumer preflight API.
+- Centralized evidence, immutable prepared inputs, and reset transactions under
+  controller-issued artifact/cache paths. Routine post-lease cleanup now ages
+  evidence and failed state after 48 hours and caches after 168 hours; one
+  guarded command can remove every generated lab file.
+- Added signal-aware lease cleanup so interrupted automation stops and restores
+  its owned guest to the requested baseline.
 - Replaced consumer-specific `/tmp` locks with one lab-owned lease per guest.
   Lease status now records the owner, run ID, PID, command, working directory,
   backing image, allocated overlay size, and uptime.
