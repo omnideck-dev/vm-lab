@@ -6,6 +6,7 @@
 | Desktop full E2E | Ubuntu, Debian, Fedora, Silverblue, Windows | Explicit `dev-fast` or `release-clean` profile | Packaged launch, setup, hosted app, recovery and lifecycle journeys |
 | Desktop package smoke | Any Linux guest selected independently of package type | Explicit profile | Launch-only AppImage, DEB, RPM, or Flatpak compatibility proof |
 | Published qualification | Selected full lanes plus optional cross-distro smoke | `release-clean` | Published bytes, provenance, native journeys and optional compatibility cells |
+| Native macOS ARM64 | Disposable physical `macos-arm64` host | `ready` plus `runtime-ready` lease cleanup | Direct CLI/app install, native lifecycle, evidence, and scoped rollback |
 
 VM identity describes the distribution. Package identity is separate metadata;
 an RPM smoke on Ubuntu is therefore represented as `distro=ubuntu` and
@@ -30,3 +31,18 @@ Canonical matrix entry points are `tests/e2e/matrix.sh` for CLI and
 `desktop/tests/e2e/candidate-matrix.sh` for Desktop. Cross-distribution Desktop
 smoke leases and boots each selected guest once, then runs all selected package
 cells against that boot.
+
+The Mac is dedicated to the lab and disposable at the application layer.
+Consumers acquire its lease with `--cleanup-baseline runtime-ready`, reset it
+before installing exact artifacts, copy evidence back to the controller root,
+and rely on the lease to remove the installed app, checksum-marked CLI,
+OmniDeck state, staging directories, and explicitly named containers/volumes.
+The expensive Podman installation and `omnideck-runtime` Linux machine stay
+warm. This is clean-application coverage, not clean-OS or Gatekeeper-download
+coverage.
+
+The canonical controller-side entry point is
+`automation/macos/run-suite.sh --cli-repo PATH --desktop-repo PATH --artifact
+PATH.dmg`. It runs the CLI/TUI and Desktop consumers sequentially because both
+share the same 8 GB host and warm runtime, then writes an aggregate status and
+the exact DMG digest under `artifacts/macos/aggregate/`.

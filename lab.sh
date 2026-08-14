@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 LAB_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ENGINE="$LAB_ROOT/lab-engine.sh"
+HOST_ENGINE="$LAB_ROOT/lab-host.sh"
 RUNTIME_DIR="$LAB_ROOT/runtime"
 LEASE_DIR="$RUNTIME_DIR/leases"
 DISCARDED_DIR="$LAB_ROOT/discarded"
@@ -16,15 +17,17 @@ LAB_VERSION="$(<"$LAB_ROOT/VERSION")"
 DEFAULT_RETENTION_HOURS="${OMNIDECK_VM_LAB_RETENTION_HOURS:-48}"
 DEFAULT_CACHE_RETENTION_HOURS="${OMNIDECK_VM_LAB_CACHE_RETENTION_HOURS:-168}"
 ALL_VMS=(appimage deb rpm atomic windows)
+ALL_HOSTS=(macos-arm64)
+ALL_TARGETS=("${ALL_VMS[@]}" "${ALL_HOSTS[@]}")
 
 usage() {
   cat <<'EOF'
 Usage: ./lab.sh COMMAND [ARGS...]
 
 Ownership and lifecycle:
-  lease VM OWNER [RUN_ID] [--keep-state] -- COMMAND...
-  status [VM] [--verbose|--json]
-  describe VM [--shell|--json]
+  lease TARGET OWNER [RUN_ID] [--keep-state] -- COMMAND...
+  status [TARGET] [--verbose|--json]
+  describe TARGET [--shell|--json]
   inventory [--json]
   baseline VM cli|desktop
   profile PROFILE VM
@@ -48,7 +51,15 @@ Guest commands (must run inside `lease`):
   screenshot VM DEST     Capture the graphical console
   viewer VM              Open the SPICE viewer
   stop VM                Stop the guest
-  reset VM [NAME]        Reset into a transaction-backed overlay
+  reset TARGET [NAME]    Reset a VM overlay or disposable host application state
+
+Physical-host commands (must run inside `lease`):
+  reset macos-arm64 runtime-ready
+  verify macos-arm64
+  ssh macos-arm64
+  run macos-arm64 COMMAND...
+  copy-to macos-arm64 SRC DEST
+  copy-from macos-arm64 SRC DEST
 
 Snapshots and maintenance:
   snapshot VM NAME       Create a named checkpoint; clean replacement is disabled
@@ -72,6 +83,9 @@ Evidence API:
 
 Canonical guests are ubuntu, debian, fedora, silverblue, and windows. Legacy
 aliases appimage, deb, rpm, and atomic remain supported.
+
+The physical Apple Silicon lane is macos-arm64 (alias: macos). Its machine-
+specific SSH target is configured in hosts/macos-arm64.json.
 EOF
 }
 
@@ -86,6 +100,20 @@ canonical_vm() {
   esac
 }
 
+canonical_target() {
+  case "${1:?TARGET is required}" in
+    macos|macos-arm64) printf 'macos-arm64\n' ;;
+    *) canonical_vm "$1" ;;
+  esac
+}
+
+target_kind() {
+  case "$1" in
+    macos-arm64) printf 'host\n' ;;
+    *) printf 'vm\n' ;;
+  esac
+}
+
 distro_name() {
   case "$1" in
     appimage) printf 'ubuntu\n' ;;
@@ -93,6 +121,7 @@ distro_name() {
     rpm) printf 'fedora\n' ;;
     atomic) printf 'silverblue\n' ;;
     windows) printf 'windows\n' ;;
+    macos-arm64) printf 'macos\n' ;;
   esac
 }
 
@@ -139,22 +168,29 @@ require_lease() {
     printf 'The active lease owns %s, not %s.\n' "${OMNIDECK_VM_LAB_VM:-unknown}" "$vm" >&2
     exit 2
   }
-  [[ -n "${OMNIDECK_VM_LAB_TRANSACTION_DIR:-}" ]] || {
+}
+
+require_vm_lease() {
+  local vm="$1"
+  require_lease "$vm"
+  [[ "$(target_kind "$vm")" == vm && -n "${OMNIDECK_VM_LAB_TRANSACTION_DIR:-}" ]] || {
     printf 'The active lease has no transaction directory.\n' >&2
     exit 2
   }
 }
 
 write_lease_metadata() {
-  local path="$1" vm="$2" owner="$3" run_id="$4" token="$5"
+  local path="$1" vm="$2" owner="$3" run_id="$4" token="$5" kind
+  kind="$(target_kind "$vm")"
   shift 5
-  python3 - "$path" "$vm" "$(distro_name "$vm")" "$owner" "$run_id" "$token" "$$" "$PWD" "$@" <<'PY'
+  python3 - "$path" "$vm" "$(distro_name "$vm")" "$kind" "$owner" "$run_id" "$token" "$$" "$PWD" "$@" <<'PY'
 import datetime, json, os, sys, tempfile
-path, vm, distro, owner, run_id, token, pid, cwd, *command = sys.argv[1:]
+path, vm, distro, kind, owner, run_id, token, pid, cwd, *command = sys.argv[1:]
 record = {
     "schemaVersion": 1,
     "vm": vm,
     "distro": distro,
+    "kind": kind,
     "owner": owner,
     "runId": run_id,
     "token": token,
@@ -213,10 +249,11 @@ PY
 }
 
 lease_command() {
-  local requested_vm="${1:?VM is required}" owner="${2:?OWNER is required}"
+  local requested_vm="${1:?TARGET is required}" owner="${2:?OWNER is required}"
   shift 2
-  local vm run_id="" keep_state=0 cleanup_baseline="" lease_signal=""
-  vm="$(canonical_vm "$requested_vm")"
+  local vm kind run_id="" keep_state=0 cleanup_baseline="" lease_signal=""
+  vm="$(canonical_target "$requested_vm")"
+  kind="$(target_kind "$vm")"
   validate_identifier owner "$owner"
   if [[ "${1:-}" != "--" && "${1:-}" != --* ]]; then
     run_id="$1"
@@ -236,6 +273,14 @@ lease_command() {
   [[ "${1:-}" == "--" ]] || { printf 'lease requires -- before COMMAND.\n' >&2; exit 2; }
   shift
   (($#)) || { printf 'lease requires COMMAND.\n' >&2; exit 2; }
+  if [[ "$kind" == host && "$keep_state" == 1 ]]; then
+    printf 'Physical-host leases do not retain state.\n' >&2
+    exit 2
+  fi
+  if [[ "$kind" == host && -n "$cleanup_baseline" && "$cleanup_baseline" != runtime-ready ]]; then
+    printf 'Physical-host cleanup baseline must be runtime-ready.\n' >&2
+    exit 2
+  fi
 
   ensure_layout
   local lease_file metadata token transaction_dir expires_at result
@@ -251,14 +296,18 @@ lease_command() {
     fuser -v "$lease_file" >&2 2>/dev/null || true
     exit 1
   fi
-  if "$ENGINE" status "$vm" | grep -Eq "^${vm} running "; then
+  if [[ "$kind" == vm ]] && "$ENGINE" status "$vm" | grep -Eq "^${vm} running "; then
     printf 'The %s guest is already running; refusing to claim an ambiguous owner.\n' "$vm" >&2
     exit 1
   fi
 
-  mkdir -p "$transaction_dir/state"
-  : > "$transaction_dir/state-index.tsv"
-  write_transaction_metadata "$transaction_dir/metadata.json" "$vm" "$owner" "$run_id" running 0
+  if [[ "$kind" == vm ]]; then
+    mkdir -p "$transaction_dir/state"
+    : > "$transaction_dir/state-index.tsv"
+    write_transaction_metadata "$transaction_dir/metadata.json" "$vm" "$owner" "$run_id" running 0
+  else
+    transaction_dir=""
+  fi
   write_lease_metadata "$metadata" "$vm" "$owner" "$run_id" "$token" "$@"
   export OMNIDECK_VM_LAB_LEASED=1
   export OMNIDECK_VM_LAB_VM="$vm"
@@ -278,7 +327,7 @@ lease_command() {
   if [[ -n "$lease_signal" && "$result" == 0 ]]; then
     case "$lease_signal" in INT) result=130 ;; TERM) result=143 ;; HUP) result=129 ;; esac
   fi
-  if [[ -n "$cleanup_baseline" && "$result" -ge 128 ]]; then
+  if [[ "$kind" == vm && -n "$cleanup_baseline" && "$result" -ge 128 ]]; then
     if "$ENGINE" status "$vm" | grep -Eq "^${vm} running "; then
       "$ENGINE" stop "$vm" || result=1
     fi
@@ -286,16 +335,21 @@ lease_command() {
       "$ENGINE" reset "$vm" "$cleanup_baseline" || result=1
     fi
   fi
-  expires_at="$(( $(date +%s) + DEFAULT_RETENTION_HOURS * 3600 ))"
-  if [[ "$result" == 0 && "$keep_state" == 0 ]]; then
-    rm -rf -- "$transaction_dir"
-  else
-    if [[ "$result" == 0 ]]; then
-      write_transaction_metadata "$transaction_dir/metadata.json" "$vm" "$owner" "$run_id" retained "$expires_at"
+  if [[ "$kind" == vm ]]; then
+    expires_at="$(( $(date +%s) + DEFAULT_RETENTION_HOURS * 3600 ))"
+    if [[ "$result" == 0 && "$keep_state" == 0 ]]; then
+      rm -rf -- "$transaction_dir"
     else
-      write_transaction_metadata "$transaction_dir/metadata.json" "$vm" "$owner" "$run_id" failed "$expires_at"
+      if [[ "$result" == 0 ]]; then
+        write_transaction_metadata "$transaction_dir/metadata.json" "$vm" "$owner" "$run_id" retained "$expires_at"
+      else
+        write_transaction_metadata "$transaction_dir/metadata.json" "$vm" "$owner" "$run_id" failed "$expires_at"
+      fi
+      printf 'Retained transaction state until GC expiry: %s\n' "$transaction_dir" >&2
     fi
-    printf 'Retained transaction state until GC expiry: %s\n' "$transaction_dir" >&2
+  fi
+  if [[ "$kind" == host && -n "$cleanup_baseline" ]]; then
+    if ! "$HOST_ENGINE" reset "$vm" "$cleanup_baseline"; then result=1; fi
   fi
   if [[ -f "$metadata" ]] && grep -Fq "\"token\": \"$token\"" "$metadata"; then
     unlink "$metadata"
@@ -322,6 +376,8 @@ describe_vm() {
   esac
   case "$format" in
     --shell)
+      printf 'LAB_TARGET=%q\n' "$vm"
+      printf 'LAB_TARGET_KIND=vm\n'
       printf 'LAB_VM=%q\n' "$vm"
       printf 'LAB_VM_DISTRO=%q\n' "$distro"
       printf 'LAB_VM_SSH_PORT=%q\n' "$ssh_port"
@@ -337,9 +393,124 @@ describe_vm() {
   esac
 }
 
+describe_host() {
+  local host format="${2:---shell}" config ssh_target="" remote_path="" configured=false
+  host="$(canonical_target "$1")"
+  [[ "$(target_kind "$host")" == host ]] || { printf 'Not a physical host: %s\n' "$1" >&2; return 2; }
+  config="$LAB_ROOT/hosts/${host}.json"
+  if [[ -f "$config" ]]; then
+    configured=true
+    IFS=$'\t' read -r ssh_target remote_path < <(python3 - "$config" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    config = json.load(handle)
+print(config["sshTarget"], config.get("path", "/usr/bin:/bin:/usr/sbin:/sbin"), sep="\t")
+PY
+)
+  fi
+  case "$format" in
+    --shell)
+      printf 'LAB_TARGET=%q\n' "$host"
+      printf 'LAB_TARGET_KIND=host\n'
+      printf 'LAB_VM=%q\n' "$host"
+      printf 'LAB_VM_DISTRO=macos\n'
+      printf 'LAB_HOST_OS=macos\n'
+      printf 'LAB_HOST_ARCH=arm64\n'
+      printf 'LAB_HOST_CONFIGURED=%q\n' "$configured"
+      printf 'LAB_HOST_SSH_TARGET=%q\n' "$ssh_target"
+      printf 'LAB_HOST_REMOTE_PATH=%q\n' "$remote_path"
+      ;;
+    --json)
+      python3 - "$host" "$configured" "$ssh_target" "$remote_path" "$config" <<'PY'
+import json, sys
+host, configured, ssh_target, remote_path, config = sys.argv[1:]
+print(json.dumps({
+    "schemaVersion": 1,
+    "target": host,
+    "vm": host,
+    "kind": "host",
+    "distro": "macos",
+    "os": "macos",
+    "architecture": "arm64",
+    "memoryMiB": 8192,
+    "configured": configured == "true",
+    "sshTarget": ssh_target or None,
+    "remotePath": remote_path or None,
+    "configuration": config,
+}, sort_keys=True))
+PY
+      ;;
+    *) printf 'Unknown describe format: %s\n' "$format" >&2; exit 2 ;;
+  esac
+}
+
+describe_target() {
+  local target
+  target="$(canonical_target "${1:?TARGET is required}")"
+  if [[ "$(target_kind "$target")" == host ]]; then
+    describe_host "$target" "${2:---shell}"
+  else
+    describe_vm "$target" "${2:---shell}"
+  fi
+}
+
+status_host() {
+  local host="$1" format="${2:---verbose}" basic metadata lease_file
+  host="$(canonical_target "$host")"
+  basic="$($HOST_ENGINE status "$host")"
+  metadata="$(lease_metadata_for "$host")"
+  lease_file="$(lease_file_for "$host")"
+  if [[ "$format" == --json ]]; then
+    python3 - "$host" "$basic" "$metadata" <<'PY'
+import json, os, re, sys
+host, basic, metadata = sys.argv[1:]
+match = re.match(r"^\S+ (ready|unavailable|unconfigured|incompatible)(?: ssh=(\S+))?(?: os=(\S+) arch=(\S+))?", basic)
+record = {
+    "schemaVersion": 1,
+    "target": host,
+    "vm": host,
+    "kind": "host",
+    "distro": "macos",
+    "state": match.group(1) if match else "unknown",
+    "sshTarget": match.group(2) if match else None,
+    "os": match.group(3) if match else None,
+    "architecture": match.group(4) if match else None,
+    "lease": None,
+}
+if os.path.exists(metadata):
+    try:
+        with open(metadata) as handle:
+            record["lease"] = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        record["lease"] = {"status": "unreadable"}
+print(json.dumps(record, sort_keys=True))
+PY
+    return
+  fi
+  printf '%s\n' "$basic"
+  if lease_is_held "$host"; then
+    if [[ -f "$metadata" ]]; then
+      python3 - "$metadata" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    lease = json.load(handle)
+print("  lease owner={owner} run={runId} pid={pid} cwd={cwd}".format(**lease))
+PY
+    else
+      printf '  lease held; metadata missing (inspect with fuser %s)\n' "$lease_file"
+    fi
+  elif [[ -f "$metadata" ]]; then
+    printf '  stale lease metadata: %s\n' "$metadata"
+  fi
+}
+
 status_one() {
   local vm="$1" format="${2:---verbose}" basic metadata lease_file
-  vm="$(canonical_vm "$vm")"
+  vm="$(canonical_target "$vm")"
+  if [[ "$(target_kind "$vm")" == host ]]; then
+    status_host "$vm" "$format"
+    return
+  fi
   basic="$("$ENGINE" status "$vm")"
   metadata="$(lease_metadata_for "$vm")"
   lease_file="$(lease_file_for "$vm")"
@@ -350,7 +521,9 @@ vm, distro, basic, metadata, lease_file = sys.argv[1:]
 match = re.search(r"^(\w+) (running|stopped)(?: pid=(\d+))? ssh=(\d+) spice=(\d+)$", basic)
 record = {
     "schemaVersion": 1,
+    "target": vm,
     "vm": vm,
+    "kind": "vm",
     "distro": distro,
     "state": match.group(2) if match else "unknown",
     "pid": int(match.group(3)) if match and match.group(3) else None,
@@ -402,29 +575,37 @@ inventory_command() {
   if [[ "$format" == "--json" ]]; then
     printf '['
     local separator=""
-    for vm in "${ALL_VMS[@]}"; do
+    for vm in "${ALL_TARGETS[@]}"; do
       printf '%s' "$separator"
-      describe_vm "$vm" --json | tr -d '\n'
+      describe_target "$vm" --json | tr -d '\n'
       separator=,
     done
     printf ']\n'
     return
   fi
-  printf 'vm\tdistro\tssh\tspice\tmemoryMiB\tdiskGiB\n'
+  printf 'target\tkind\tplatform\tconnection\tmemoryMiB\tstorageGiB\n'
   for vm in "${ALL_VMS[@]}"; do
     eval "$(describe_vm "$vm" --shell)"
     case "$vm" in
-      appimage|deb|rpm) printf '%s\t%s\t%s\t%s\t6144\t50\n' "$vm" "$LAB_VM_DISTRO" "$LAB_VM_SSH_PORT" "$LAB_VM_SPICE_PORT" ;;
-      atomic) printf '%s\t%s\t%s\t%s\t8192\t60\n' "$vm" "$LAB_VM_DISTRO" "$LAB_VM_SSH_PORT" "$LAB_VM_SPICE_PORT" ;;
-      windows) printf '%s\t%s\t%s\t%s\t8192\t100\n' "$vm" "$LAB_VM_DISTRO" "$LAB_VM_SSH_PORT" "$LAB_VM_SPICE_PORT" ;;
+      appimage|deb|rpm) printf '%s\tvm\t%s/x86_64\tssh:%s spice:%s\t6144\t50\n' "$vm" "$LAB_VM_DISTRO" "$LAB_VM_SSH_PORT" "$LAB_VM_SPICE_PORT" ;;
+      atomic) printf '%s\tvm\t%s/x86_64\tssh:%s spice:%s\t8192\t60\n' "$vm" "$LAB_VM_DISTRO" "$LAB_VM_SSH_PORT" "$LAB_VM_SPICE_PORT" ;;
+      windows) printf '%s\tvm\t%s/x86_64\tssh:%s spice:%s\t8192\t100\n' "$vm" "$LAB_VM_DISTRO" "$LAB_VM_SSH_PORT" "$LAB_VM_SPICE_PORT" ;;
     esac
+  done
+  for vm in "${ALL_HOSTS[@]}"; do
+    eval "$(describe_host "$vm" --shell)"
+    printf '%s\thost\tmacos/arm64\t%s\t8192\tphysical\n' "$vm" "${LAB_HOST_SSH_TARGET:-unconfigured}"
   done
 }
 
 baseline_command() {
   local vm suite candidate
-  vm="$(canonical_vm "${1:?VM is required}")"
+  vm="$(canonical_target "${1:?TARGET is required}")"
   suite="${2:?SUITE is required}"
+  if [[ "$(target_kind "$vm")" == host ]]; then
+    case "$suite" in cli|desktop) printf 'ready\n' ;; *) printf 'Unknown suite: %s\n' "$suite" >&2; return 2 ;; esac
+    return
+  fi
   case "$suite" in
     cli) printf 'clean\n' ;;
     desktop)
@@ -447,7 +628,7 @@ baseline_command() {
 
 profile_command() {
   local profile="${1:?PROFILE is required}" vm
-  vm="$(canonical_vm "${2:?VM is required}")"
+  vm="$(canonical_target "${2:?TARGET is required}")"
   [[ -f "$MANIFEST" ]] || { printf 'Missing lab manifest: %s\n' "$MANIFEST" >&2; return 1; }
   python3 - "$MANIFEST" "$profile" "$vm" <<'PY'
 import json, sys
@@ -465,10 +646,10 @@ capabilities_command() {
   local format="${1:---json}"
   case "$format" in
     --json)
-      printf '{"schemaVersion":1,"controllerApi":2,"labVersion":"%s","features":["artifact-path","cache-path","capabilities","cleanup","evidence-v1","lease-cleanup","paths","preflight","profiles","provenance","strict-doctor"]}\n' "$LAB_VERSION"
+      printf '{"schemaVersion":1,"controllerApi":3,"labVersion":"%s","features":["artifact-path","cache-path","capabilities","cleanup","disposable-hosts","evidence-v1","lease-cleanup","paths","preflight","profiles","provenance","remote-hosts","strict-doctor"]}\n' "$LAB_VERSION"
       ;;
     --text)
-      printf '%s\n' artifact-path cache-path capabilities cleanup evidence-v1 lease-cleanup paths preflight profiles provenance strict-doctor
+      printf '%s\n' artifact-path cache-path capabilities cleanup disposable-hosts evidence-v1 lease-cleanup paths preflight profiles provenance remote-hosts strict-doctor
       ;;
     *) printf 'Unknown capabilities format: %s\n' "$format" >&2; return 2 ;;
   esac
@@ -640,11 +821,26 @@ preflight_command() {
   [[ -n "$lanes_csv" ]] || { if [[ "$suite" == cli ]]; then lanes_csv=appimage,deb,rpm,windows; else lanes_csv=appimage,deb,rpm,atomic,windows; fi; }
   local -a lanes=()
   IFS=',' read -r -a lanes <<<"$lanes_csv"
-  local temporary errors=0 requested vm baseline status manifest_path
+  local temporary errors=0 requested vm kind baseline status manifest_path
   temporary="$(mktemp "$RUNTIME_DIR/.preflight.XXXXXX")"
   for requested in "${lanes[@]}"; do
-    vm="$(canonical_vm "$requested")" || { errors=$((errors + 1)); continue; }
+    vm="$(canonical_target "$requested")" || { errors=$((errors + 1)); continue; }
+    kind="$(target_kind "$vm")"
     if [[ -n "$baseline_override" ]]; then baseline="$baseline_override"; else baseline="$(profile_command "$profile" "$vm")" || { errors=$((errors + 1)); continue; }; fi
+    if [[ "$kind" == host ]]; then
+      manifest_path="$LAB_ROOT/hosts/${vm}.json"
+      status="$($HOST_ENGINE status "$vm")"
+      if [[ "$baseline" != ready ]]; then
+        printf '%s\t%s\t%s\tunsupported-baseline\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+        errors=$((errors + 1))
+      elif [[ "$status" != "${vm} ready "* ]]; then
+        printf '%s\t%s\t%s\t%s\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$(awk '{print $2}' <<<"$status")" "$manifest_path" >> "$temporary"
+        errors=$((errors + 1))
+      else
+        printf '%s\t%s\t%s\tready\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+      fi
+      continue
+    fi
     status="$("$ENGINE" status "$vm")"
     manifest_path="$LAB_ROOT/golden/manifests/${vm}-${baseline}.json"
     if [[ "$status" != "${vm} stopped "* ]]; then
@@ -696,7 +892,7 @@ evidence_init() {
   (($# >= 7)) || { printf 'evidence-init requires DIR OWNER SUITE RUN_ID COMMIT VM BASELINE.\n' >&2; exit 2; }
   local directory owner suite run_id commit vm baseline
   directory="$(safe_artifact_dir "$1")"; owner="$2"; suite="$3"; run_id="$4"; commit="$5"
-  if [[ "$6" == multi ]]; then vm=multi; else vm="$(canonical_vm "$6")"; fi
+  if [[ "$6" == multi ]]; then vm=multi; else vm="$(canonical_target "$6")"; fi
   baseline="$7"
   shift 7
   validate_identifier owner "$owner"; validate_identifier suite "$suite"; validate_identifier run-id "$run_id"
@@ -848,6 +1044,27 @@ doctor_command() {
       printf 'ERROR unreadable clean golden: %s\n' "$golden"
       errors=$((errors + 1))
     fi
+  done
+  for vm in "${ALL_HOSTS[@]}"; do
+    local host_status
+    host_status="$($HOST_ENGINE status "$vm")"
+    status_host "$vm" --verbose
+    case "$host_status" in
+      "$vm ready "*)
+        if ! "$HOST_ENGINE" verify "$vm"; then
+          printf 'ERROR physical host verification failed: %s\n' "$vm"
+          errors=$((errors + 1))
+        fi
+        ;;
+      "$vm unconfigured")
+        printf 'WARN optional physical host is not configured: %s\n' "$vm"
+        warnings=$((warnings + 1))
+        ;;
+      *)
+        printf 'ERROR physical host is configured but not ready: %s\n' "$vm"
+        errors=$((errors + 1))
+        ;;
+    esac
   done
   if [[ "$mode" == --strict || "$mode" == --deep ]]; then
     local install_record="$LAB_ROOT/controller-install.json"
@@ -1009,7 +1226,7 @@ gc_command() {
     for vm in "${ALL_VMS[@]}"; do
       if lease_is_held "$vm"; then
         printf 'Refusing GC while %s is leased.\n' "$vm" >&2
-        exit 1
+        return 1
       fi
     done
   fi
@@ -1104,16 +1321,16 @@ case "$command" in
     shift
     if [[ "${1:-}" == --json ]]; then
       printf '['; separator=""
-      for vm in "${ALL_VMS[@]}"; do printf '%s' "$separator"; status_one "$vm" --json | tr -d '\n'; separator=,; done
+      for vm in "${ALL_TARGETS[@]}"; do printf '%s' "$separator"; status_one "$vm" --json | tr -d '\n'; separator=,; done
       printf ']\n'
     elif [[ -n "${1:-}" ]]; then
       vm="$1"; shift
       status_one "$vm" "${1:---verbose}"
     else
-      for vm in "${ALL_VMS[@]}"; do status_one "$vm" --verbose; done
+      for vm in "${ALL_TARGETS[@]}"; do status_one "$vm" --verbose; done
     fi
     ;;
-  describe) describe_vm "${2:?VM is required}" "${3:---shell}" ;;
+  describe) describe_target "${2:?TARGET is required}" "${3:---shell}" ;;
   inventory) inventory_command "${2:---text}" ;;
   baseline) baseline_command "${2:?VM is required}" "${3:?SUITE is required}" ;;
   profile) profile_command "${2:?PROFILE is required}" "${3:?VM is required}" ;;
@@ -1133,20 +1350,39 @@ case "$command" in
   checkpoint) shift; checkpoint_command "$@" ;;
   snapshot)
     [[ -n "${3:-}" ]] || { printf 'Replacing clean snapshots is disabled; provide a new named checkpoint.\n' >&2; exit 2; }
-    vm="$(canonical_vm "${2:?VM is required}")"; require_lease "$vm"; "$ENGINE" snapshot "$vm" "$3"
+    vm="$(canonical_vm "${2:?VM is required}")"; require_vm_lease "$vm"; "$ENGINE" snapshot "$vm" "$3"
     ;;
   snapshots) "$ENGINE" "$@" ;;
-  start|stop|reset|wait|verify|ssh|run|copy-to|copy-from|send-keys|screenshot|viewer)
-    vm="$(canonical_vm "${2:?VM is required}")"; require_lease "$vm"; "$ENGINE" "$command" "$vm" "${@:3}"
+  reset)
+    vm="$(canonical_target "${2:?TARGET is required}")"
+    require_lease "$vm"
+    if [[ "$(target_kind "$vm")" == host ]]; then
+      "$HOST_ENGINE" reset "$vm" "${3:?BASELINE is required}"
+    else
+      require_vm_lease "$vm"
+      "$ENGINE" reset "$vm" "${3:-clean}"
+    fi
+    ;;
+  start|stop|wait|send-keys|screenshot|viewer)
+    vm="$(canonical_vm "${2:?VM is required}")"; require_vm_lease "$vm"; "$ENGINE" "$command" "$vm" "${@:3}"
+    ;;
+  verify|ssh|run|copy-to|copy-from)
+    vm="$(canonical_target "${2:?TARGET is required}")"; require_lease "$vm"
+    if [[ "$(target_kind "$vm")" == host ]]; then
+      "$HOST_ENGINE" "$command" "$vm" "${@:3}"
+    else
+      require_vm_lease "$vm"
+      "$ENGINE" "$command" "$vm" "${@:3}"
+    fi
     ;;
   install-atomic)
-    require_lease atomic; "$ENGINE" install-atomic
+    require_vm_lease atomic; "$ENGINE" install-atomic
     ;;
   install-windows)
-    require_lease windows; "$ENGINE" install-windows
+    require_vm_lease windows; "$ENGINE" install-windows
     ;;
   init)
-    if [[ -n "${2:-}" ]]; then vm="$(canonical_vm "$2")"; require_lease "$vm"; "$ENGINE" init "$vm"; else printf 'Initialize guests one at a time under their leases.\n' >&2; exit 2; fi
+    if [[ -n "${2:-}" ]]; then vm="$(canonical_vm "$2")"; require_vm_lease "$vm"; "$ENGINE" init "$vm"; else printf 'Initialize guests one at a time under their leases.\n' >&2; exit 2; fi
     ;;
   --version) printf 'omnideck-vm-lab %s\n' "$LAB_VERSION" ;;
   --help|-h|help|'') usage ;;
