@@ -68,4 +68,6 @@ before doing expensive work or acquiring a guest.
 the Mac consumer then requests the stronger `runtime-ready` cleanup contract on
 its lease. `dev-fast` never silently falls back from its declared mapping.
 Every accepted clean or named baseline has a SHA-256 provenance manifest under
-`golden/manifests/`.
+`golden/manifests/`. Provenance binds the selected VM's canonical image and
+provisioning contract. Profiles, retention policy, physical hosts, and other VM
+definitions do not invalidate an unchanged baseline.

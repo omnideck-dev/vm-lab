@@ -38,7 +38,7 @@ public snapshot interface.
 
 Test the checkpoint first with an explicit `preflight --baseline NAME`. If it is
 then selected by a shared profile, update `lab-manifest.json` and run `install.sh`
-against the deployed lab. Because provenance binds the complete manifest,
-recapture provenance for every clean or named baseline referenced by the new
-manifest, then run `lab.sh doctor --strict` and the exact consumer/profile
+against the deployed lab. Recapture provenance only when that VM's image or
+provisioning contract changes. Profile-only changes do not invalidate baseline
+provenance. Then run `lab.sh doctor --strict` and the exact consumer/profile
 `lab.sh preflight`.

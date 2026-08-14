@@ -36,10 +36,15 @@ python3 - "$test_root/lab-manifest.json" "$test_root/golden/manifests/appimage-d
 import hashlib, json, sys
 with open(sys.argv[1], "rb") as handle:
     config_sha = hashlib.sha256(handle.read()).hexdigest()
+with open(sys.argv[1]) as handle:
+    manifest = json.load(handle)
+contract = {"schemaVersion": 1, "vm": "appimage", "vmSpec": manifest["vms"]["appimage"]}
+contract_sha = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 record = {
         "schemaVersion": 1,
         "vm": "appimage",
         "labManifestSha256": config_sha,
+        "provenanceContractSha256": contract_sha,
         "diskSha256": "a" * 64,
         "uefiVarsSha256": "b" * 64,
         "tpmTreeSha256": "none",
@@ -54,6 +59,55 @@ PY
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 "$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
+python3 - "$test_root/golden/manifests/appimage-clean.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as handle:
+    record = json.load(handle)
+record.pop("provenanceContractSha256")
+with open(path, "w") as handle:
+    json.dump(record, handle)
+PY
+"$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
+  python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
+python3 - "$test_root/golden/manifests/appimage-clean.json" "$test_root/golden/manifests/appimage-desktop-e2e-v2.json" <<'PY'
+import json, sys
+path, source = sys.argv[1:]
+with open(path) as handle:
+    record = json.load(handle)
+with open(source) as handle:
+    current = json.load(handle)
+record["provenanceContractSha256"] = current["provenanceContractSha256"]
+with open(path, "w") as handle:
+    json.dump(record, handle)
+PY
+python3 - "$test_root/lab-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as handle:
+    manifest = json.load(handle)
+manifest["profiles"]["dev-fast"]["deb"] = "desktop-e2e-v4"
+with open(path, "w") as handle:
+    json.dump(manifest, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+"$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
+  python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
+python3 - "$test_root/lab-manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as handle:
+    manifest = json.load(handle)
+manifest["vms"]["appimage"]["memoryMiB"] += 1
+with open(path, "w") as handle:
+    json.dump(manifest, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+if changed_contract_result="$("$test_root/lab.sh" preflight cli release-clean --lanes appimage --json)"; then
+  printf 'VM contract change unexpectedly preserved provenance\n' >&2
+  exit 1
+fi
+python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is False' <<<"$changed_contract_result"
 "$test_root/lab.sh" preflight cli release-clean --lanes macos-arm64 --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 if "$test_root/lab.sh" start ubuntu >/dev/null 2>&1; then
