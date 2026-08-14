@@ -7,7 +7,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/caffeinate</string>
-    <string>-dims</string>
+    <string>-dimsu</string>
   </array>
   <key>ProcessType</key>
   <string>Background</string>

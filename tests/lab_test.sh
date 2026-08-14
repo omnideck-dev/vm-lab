@@ -25,6 +25,9 @@ cp "$source_dir/hosts/macos-arm64.example.json" "$test_root/hosts/macos-arm64.js
 "$test_root/lab.sh" profile release-clean ubuntu | grep -Fxq clean
 "$test_root/lab.sh" describe macos --json | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["kind"] == "host" and data["architecture"] == "arm64"'
 "$test_root/lab.sh" profile release-clean macos | grep -Fxq ready
+touch "$test_root/runtime/fake-host-locked"
+"$test_root/lab.sh" status macos --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["state"] == "locked"'
+rm "$test_root/runtime/fake-host-locked"
 "$test_root/lab.sh" capabilities --json | python3 -c 'import json,sys; assert "artifact-path" in json.load(sys.stdin)["features"]'
 "$test_root/lab.sh" artifact-path cli e2e test-run | grep -Fxq "$test_root/artifacts/cli/e2e/test-run"
 "$test_root/lab.sh" cache-path cli builder-test | grep -Fxq "$test_root/cache/cli/builder-test"
@@ -132,6 +135,9 @@ mkdir -p "$install_root"/{base-images,disks,golden}
 [[ -f "$install_root/automation/macos/OmnideckLabDriver.m" ]]
 [[ -f "$install_root/automation/macos/OmnideckLabInput.m" ]]
 [[ -f "$install_root/automation/macos/dev.omnideck.lab-awake.plist" ]]
+grep -Fq 'lease "$host" macos-bootstrap' "$install_root/automation/macos/bootstrap-host.sh"
+grep -Fq 'Using newest cached Desktop DMG' "$install_root/automation/macos/run-suite.sh"
+grep -Fq "'lanes':{'cli':cli_status,'desktop':desktop_status}" "$install_root/automation/macos/run-suite.sh"
 python3 - "$install_root/controller-install.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as handle:

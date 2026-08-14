@@ -24,8 +24,7 @@ cp hosts/macos-arm64.example.json hosts/macos-arm64.json
 ./automation/macos/bootstrap-host.sh macos-arm64
 ./automation/macos/run-suite.sh \
   --cli-repo /path/to/omnideck-cli \
-  --desktop-repo /path/to/omnideck \
-  --artifact /path/to/omnideck_aarch64.dmg
+  --desktop-repo /path/to/omnideck
 ./lab.sh preflight desktop release-clean --lanes macos-arm64
 ./lab.sh lease macos-arm64 manual --cleanup-baseline runtime-ready -- bash
 ./lab.sh reset macos-arm64 runtime-ready
@@ -33,7 +32,10 @@ cp hosts/macos-arm64.example.json hosts/macos-arm64.json
 exit
 ```
 
-Bootstrap is idempotent. It installs a user-local Node.js ARM64 toolchain, the
+The complete suite bootstraps by default and selects the newest DMG already in
+the lab's Desktop cache; pass `--artifact` to pin exact bytes or
+`--no-bootstrap` after an intentional separate bootstrap. Bootstrap is
+idempotent and lease-serialized. It installs a user-local Node.js ARM64 toolchain, the
 lab reset helper, the stable `~/Applications/Omnideck Lab Driver.app`, and a
 separate trusted-input extension used for native controls that expose no AXPress
 action, then
@@ -42,8 +44,10 @@ unattended desktop UI tests, grant that driver Accessibility and Screen & System
 Audio Recording access once in macOS Privacy & Security. An unchanged driver is
 not reinstalled, so those grants survive later bootstrap runs. The input
 extension can be updated without changing the helper's permission identity. It also installs
-a user LaunchAgent that runs `caffeinate -dims` while the dedicated test user is
+a user LaunchAgent that runs `caffeinate -dimsu` while the dedicated test user is
 logged in, keeping the physical lane reachable during long unattended suites.
+Unlock the dedicated user's GUI session once before a native run; status,
+verification, and strict doctor checks reject a locked session immediately.
 
 Run the strict preflight before using a lane. Every command that can touch a guest
 must execute under one lab-owned lease:
@@ -113,9 +117,9 @@ interruption. Physical hardware still has no snapshot, start, stop, or viewer
 operation.
 
 `automation/macos/run-suite.sh` is the canonical complete Mac command. It runs
-the native CLI/TUI qualification first and then the exact-DMG Desktop
-Accessibility qualification, preserving both child logs plus one aggregate
-summary under `artifacts/macos/aggregate/`.
+the native CLI/TUI qualification and exact-DMG Desktop Accessibility
+qualification, even when the first lane fails, preserving both child logs plus
+one aggregate per-lane summary under `artifacts/macos/aggregate/`.
 
 See [architecture](docs/architecture.md), [consumers](docs/consumers.md),
 [retention](docs/retention.md), [checkpoints](docs/checkpoints.md),

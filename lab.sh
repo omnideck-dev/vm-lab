@@ -464,7 +464,7 @@ status_host() {
     python3 - "$host" "$basic" "$metadata" <<'PY'
 import json, os, re, sys
 host, basic, metadata = sys.argv[1:]
-match = re.match(r"^\S+ (ready|unavailable|unconfigured|incompatible)(?: ssh=(\S+))?(?: os=(\S+) arch=(\S+))?", basic)
+match = re.match(r"^\S+ (ready|locked|unavailable|unconfigured|incompatible)(?: ssh=(\S+))?(?: os=(\S+) arch=(\S+))?", basic)
 record = {
     "schemaVersion": 1,
     "target": host,
