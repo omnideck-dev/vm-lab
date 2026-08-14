@@ -2,6 +2,12 @@
 
 ## 2026-08-13
 
+- Hardened controller 2.3.1's native Mac automation: bootstrap is lease-
+  serialized and automatic from the aggregate suite, the newest cached DMG is
+  selected when exact bytes are not supplied, both consumer lanes always run,
+  and aggregate evidence records each result. The host now reports a locked
+  GUI session as not ready and keeps the dedicated user's session active after
+  the one-time unlock instead of allowing late Accessibility timeouts.
 - Added controller 2.3's disposable application baseline for the dedicated M1
   host. Native lanes now install the CLI and Desktop app directly, reset before
   testing, and automatically remove managed application files, state, staging,

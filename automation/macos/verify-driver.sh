@@ -13,6 +13,16 @@ target_executable="$target_application/Contents/MacOS/System Settings"
 
 [[ -x "$driver" ]] || { printf 'Accessibility driver is not installed: %s\n' "$application" >&2; exit 1; }
 [[ -f "$input_extension" ]] || { printf 'Trusted-input extension is not installed: %s\n' "$input_extension" >&2; exit 1; }
+console_user="$(stat -f %Su /dev/console)"
+[[ "$console_user" == "$(id -un)" ]] || {
+  printf 'The macOS lab user is not the active console user; sign in locally before running native UI tests.\n' >&2
+  exit 3
+}
+if /usr/sbin/ioreg -n Root -d1 | \
+   grep -Eq '"(CGSSessionScreenIsLocked|IOConsoleLocked)"[[:space:]]*=[[:space:]]*Yes'; then
+  printf 'The macOS lab session is locked; unlock it once before running native UI tests.\n' >&2
+  exit 3
+fi
 
 preflight="$("$driver" preflight 2>&1 || true)"
 [[ "$preflight" == *'accessibility=true'* ]] || {

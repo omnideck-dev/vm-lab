@@ -6,6 +6,17 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 lab_root="$(CDPATH= cd -- "$script_dir/../.." && pwd)"
 host="${1:-macos-arm64}"
 host_engine="$lab_root/lab-host.sh"
+host="$("$lab_root/lab.sh" describe "$host" --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["target"])')"
+
+if [[ "${OMNIDECK_VM_LAB_LEASED:-}" != 1 ]]; then
+  run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  exec "$lab_root/lab.sh" lease "$host" macos-bootstrap "$run_id" -- "$0" "$host"
+fi
+
+[[ "${OMNIDECK_VM_LAB_VM:-}" == "$host" ]] || {
+  printf 'The active lease does not own %s.\n' "$host" >&2
+  exit 2
+}
 
 [[ -x "$host_engine" ]] || { printf 'Missing physical-host controller: %s\n' "$host_engine" >&2; exit 1; }
 for source in prepare-host.sh reset-host.sh install-driver.sh install-input-extension.sh verify-driver.sh OmnideckLabDriver.m OmnideckLabInput.m dev.omnideck.lab-awake.plist; do

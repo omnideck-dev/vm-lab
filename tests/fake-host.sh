@@ -9,7 +9,11 @@ host="${2:-}"
 case "$command" in
   status)
     if [[ -f "$root/hosts/${host}.json" ]]; then
-      printf '%s ready ssh=fake-mac os=Darwin arch=arm64\n' "$host"
+      if [[ -f "$root/runtime/fake-host-locked" ]]; then
+        printf '%s locked ssh=fake-mac os=Darwin arch=arm64 reason=gui-session-locked\n' "$host"
+      else
+        printf '%s ready ssh=fake-mac os=Darwin arch=arm64\n' "$host"
+      fi
     else
       printf '%s unconfigured\n' "$host"
     fi

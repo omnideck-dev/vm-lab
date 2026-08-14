@@ -65,14 +65,22 @@ status_one() {
     case "$requested" in macos|macos-arm64) printf 'macos-arm64 unconfigured\n'; return 0 ;; esac
     return 2
   fi
-  if ! probe="$(remote_script 'printf "%s\t%s\n" "$(uname -s)" "$(uname -m)"' 2>/dev/null)"; then
+  if ! probe="$(remote_script '
+locked=false
+/usr/sbin/ioreg -n Root -d1 | grep -Eq '\''"(CGSSessionScreenIsLocked|IOConsoleLocked)"[[:space:]]*=[[:space:]]*Yes'\'' && locked=true
+printf "%s\t%s\t%s\n" "$(uname -s)" "$(uname -m)" "$locked"
+' 2>/dev/null)"; then
     printf '%s unavailable ssh=%s\n' "$HOST" "$SSH_TARGET"
     return 0
   fi
-  local os arch
-  IFS=$'\t' read -r os arch <<<"$probe"
+  local os arch locked
+  IFS=$'\t' read -r os arch locked <<<"$probe"
   if [[ "$os" == Darwin && "$arch" == arm64 ]]; then
-    printf '%s ready ssh=%s os=%s arch=%s\n' "$HOST" "$SSH_TARGET" "$os" "$arch"
+    if [[ "$locked" == true ]]; then
+      printf '%s locked ssh=%s os=%s arch=%s reason=gui-session-locked\n' "$HOST" "$SSH_TARGET" "$os" "$arch"
+    else
+      printf '%s ready ssh=%s os=%s arch=%s\n' "$HOST" "$SSH_TARGET" "$os" "$arch"
+    fi
   else
     printf '%s incompatible ssh=%s os=%s arch=%s\n' "$HOST" "$SSH_TARGET" "$os" "$arch"
   fi
@@ -86,6 +94,12 @@ os="$(uname -s)"
 arch="$(uname -m)"
 [[ "$os" == Darwin ]] || { printf "Expected Darwin, found %s\n" "$os" >&2; exit 1; }
 [[ "$arch" == arm64 ]] || { printf "Expected arm64, found %s\n" "$arch" >&2; exit 1; }
+console_user="$(stat -f %Su /dev/console)"
+[[ "$console_user" == "$(id -un)" ]] || { printf "The macOS lab user is not signed in at the console.\n" >&2; exit 1; }
+if /usr/sbin/ioreg -n Root -d1 | grep -Eq '\''"(CGSSessionScreenIsLocked|IOConsoleLocked)"[[:space:]]*=[[:space:]]*Yes'\''; then
+  printf "The macOS lab GUI session is locked; unlock it once before running native UI tests.\n" >&2
+  exit 1
+fi
 command -v node >/dev/null 2>&1 || { printf "Node.js is missing from the configured host PATH.\n" >&2; exit 1; }
 command -v podman >/dev/null 2>&1 || { printf "Podman is missing from the configured host PATH.\n" >&2; exit 1; }
 podman info >/dev/null

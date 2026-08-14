@@ -42,7 +42,9 @@ warm. This is clean-application coverage, not clean-OS or Gatekeeper-download
 coverage.
 
 The canonical controller-side entry point is
-`automation/macos/run-suite.sh --cli-repo PATH --desktop-repo PATH --artifact
-PATH.dmg`. It runs the CLI/TUI and Desktop consumers sequentially because both
-share the same 8 GB host and warm runtime, then writes an aggregate status and
-the exact DMG digest under `artifacts/macos/aggregate/`.
+`automation/macos/run-suite.sh --cli-repo PATH --desktop-repo PATH [--artifact
+PATH.dmg]`. It lease-serializes an idempotent host bootstrap, selects the newest
+cached DMG when exact bytes are not supplied, and runs both CLI/TUI and Desktop
+consumers sequentially because they share the same 8 GB host and warm runtime.
+Both consumers run even if the first fails, and the aggregate records each lane
+status plus the exact DMG digest under `artifacts/macos/aggregate/`.
