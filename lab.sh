@@ -540,12 +540,22 @@ PY
 doctor_command() {
   ensure_layout
   local errors=0 warnings=0 dependency vm disk golden count size
-  for dependency in bash flock python3 qemu-img qemu-system-x86_64 ssh scp; do
+  for dependency in bash flock python3 qemu-img qemu-system-x86_64 ssh scp genisoimage cloud-localds socat; do
     if ! command -v "$dependency" >/dev/null 2>&1; then
       printf 'ERROR missing dependency: %s\n' "$dependency"
       errors=$((errors + 1))
     fi
   done
+  for dependency in ffmpeg remote-viewer; do
+    if ! command -v "$dependency" >/dev/null 2>&1; then
+      printf 'WARN missing optional dependency: %s\n' "$dependency"
+      warnings=$((warnings + 1))
+    fi
+  done
+  if [[ ! -x "$LAB_ROOT/tools/swtpm-root/usr/bin/swtpm" ]]; then
+    printf 'WARN missing lab-local swtpm (required for the windows lane): %s\n' "$LAB_ROOT/tools/swtpm-root/usr/bin/swtpm"
+    warnings=$((warnings + 1))
+  fi
   for vm in "${ALL_VMS[@]}"; do
     local basic_status
     basic_status="$("$ENGINE" status "$vm")"
