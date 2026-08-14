@@ -13,10 +13,12 @@ target="$(realpath -e "$target")"
 }
 
 mkdir -p "$target/docs" "$target/runtime/leases" "$target/discarded/runs" "$target/cache" \
-  "$target/cloud-init" "$target/automation/windows"
+  "$target/cloud-init" "$target/automation/windows" "$target/automation/macos" "$target/hosts"
 install -m 0755 "$source_dir/lab-engine.sh" "$target/.lab-engine.sh.new"
+install -m 0755 "$source_dir/lab-host.sh" "$target/.lab-host.sh.new"
 install -m 0755 "$source_dir/lab.sh" "$target/.lab.sh.new"
 mv -- "$target/.lab-engine.sh.new" "$target/lab-engine.sh"
+mv -- "$target/.lab-host.sh.new" "$target/lab-host.sh"
 mv -- "$target/.lab.sh.new" "$target/lab.sh"
 install -m 0644 "$source_dir/README.md" "$target/README.md"
 install -m 0644 "$source_dir/CHANGELOG.md" "$target/CHANGELOG.md"
@@ -31,6 +33,17 @@ done
 install -m 0644 "$source_dir/automation/atomic.ks" "$target/automation/atomic.ks"
 install -m 0644 "$source_dir/automation/windows/Autounattend.xml" "$target/automation/windows/Autounattend.xml"
 install -m 0644 "$source_dir/automation/windows/provision.ps1" "$target/automation/windows/provision.ps1"
+install -m 0755 "$source_dir/automation/macos/prepare-host.sh" "$target/automation/macos/prepare-host.sh"
+install -m 0755 "$source_dir/automation/macos/reset-host.sh" "$target/automation/macos/reset-host.sh"
+install -m 0755 "$source_dir/automation/macos/run-suite.sh" "$target/automation/macos/run-suite.sh"
+install -m 0755 "$source_dir/automation/macos/install-driver.sh" "$target/automation/macos/install-driver.sh"
+install -m 0755 "$source_dir/automation/macos/install-input-extension.sh" "$target/automation/macos/install-input-extension.sh"
+install -m 0755 "$source_dir/automation/macos/verify-driver.sh" "$target/automation/macos/verify-driver.sh"
+install -m 0755 "$source_dir/automation/macos/bootstrap-host.sh" "$target/automation/macos/bootstrap-host.sh"
+install -m 0644 "$source_dir/automation/macos/OmnideckLabDriver.m" "$target/automation/macos/OmnideckLabDriver.m"
+install -m 0644 "$source_dir/automation/macos/OmnideckLabInput.m" "$target/automation/macos/OmnideckLabInput.m"
+install -m 0644 "$source_dir/automation/macos/dev.omnideck.lab-awake.plist" "$target/automation/macos/dev.omnideck.lab-awake.plist"
+install -m 0644 "$source_dir/hosts/macos-arm64.example.json" "$target/hosts/macos-arm64.example.json"
 source_commit="$(git -C "$source_dir" rev-parse --verify HEAD 2>/dev/null || printf unknown)"
 source_dirty=false
 [[ -z "$(git -C "$source_dir" status --porcelain=v1 --untracked-files=normal 2>/dev/null)" ]] || source_dirty=true
@@ -39,7 +52,15 @@ import datetime, hashlib, json, os, sys, tempfile
 path, version, commit, dirty = sys.argv[1:]
 root = os.path.dirname(path)
 installed = [
-    "VERSION", "lab.sh", "lab-engine.sh", "lab-manifest.json",
+    "VERSION", "lab.sh", "lab-engine.sh", "lab-host.sh", "lab-manifest.json",
+    "automation/macos/prepare-host.sh", "automation/macos/reset-host.sh",
+    "automation/macos/run-suite.sh",
+    "automation/macos/bootstrap-host.sh", "automation/macos/install-driver.sh",
+    "automation/macos/install-input-extension.sh",
+    "automation/macos/verify-driver.sh",
+    "automation/macos/OmnideckLabDriver.m", "automation/macos/OmnideckLabInput.m",
+    "automation/macos/dev.omnideck.lab-awake.plist",
+    "hosts/macos-arm64.example.json",
     "automation/atomic.ks", "automation/windows/Autounattend.xml",
     "automation/windows/provision.ps1", "cloud-init/appimage-user-data.yaml",
     "cloud-init/deb-user-data.yaml", "cloud-init/rpm-user-data.yaml",

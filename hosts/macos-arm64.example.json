@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "sshTarget": "macbook",
+  "path": "/Users/larry/.local/bin:/opt/podman/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+}

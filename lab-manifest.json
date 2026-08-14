@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "controllerApi": 2,
+  "controllerApi": 3,
   "generatedStorage": {
     "artifactRetentionHours": 48,
     "cacheRetentionHours": 168,
@@ -15,6 +15,7 @@
       "appimage": "desktop-e2e-v2",
       "atomic": "clean",
       "deb": "clean",
+      "macos-arm64": "ready",
       "rpm": "desktop-e2e-v2",
       "windows": "podman-ready"
     },
@@ -22,8 +23,19 @@
       "appimage": "clean",
       "atomic": "clean",
       "deb": "clean",
+      "macos-arm64": "ready",
       "rpm": "clean",
       "windows": "clean"
+    }
+  },
+  "hosts": {
+    "macos-arm64": {
+      "aliases": ["macos"],
+      "architecture": "arm64",
+      "configuration": "hosts/macos-arm64.json",
+      "memoryMiB": 8192,
+      "os": "macos",
+      "runtime": "podman"
     }
   },
   "vms": {

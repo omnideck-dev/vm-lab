@@ -11,6 +11,8 @@ runtime/
 seeds/
 tmp/
 worktrees/
+hosts/*.json
+!hosts/*.example.json
 
 *.img
 *.iso

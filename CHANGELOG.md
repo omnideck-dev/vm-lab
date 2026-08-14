@@ -2,6 +2,25 @@
 
 ## 2026-08-13
 
+- Added controller 2.3's disposable application baseline for the dedicated M1
+  host. Native lanes now install the CLI and Desktop app directly, reset before
+  testing, and automatically remove managed application files, state, staging,
+  and named OmniDeck containers/volumes when their lease exits. Podman and its
+  resource-expensive Linux machine remain warm between runs.
+- Added a controller-side aggregate macOS suite that runs the source-built
+  Darwin ARM64 CLI release contract, attended TUI, unattended lifecycle, exact
+  DMG smoke, Accessibility journeys, Custom App, and native host boundaries in
+  one command while retaining per-consumer and aggregate evidence.
+- Added controller 2.2's leased `macos-arm64` physical-host lane. It verifies
+  the native platform and shared Podman runtime over a deployment-local SSH
+  target, supports guarded run/copy operations, and participates in status,
+  inventory, evidence, and explicit preflight without pretending that physical
+  hardware has QEMU snapshot semantics.
+- Added a controller-side, idempotent Apple Silicon bootstrap that stages its
+  inputs over the configured SSH connection, installs checksum-verified Node 24
+  and a stable native Accessibility driver beneath the test user's home,
+  configures the test registry policy, and verifies the product-managed
+  `omnideck-runtime` Podman machine.
 - Added controller 2.1's declarative VM/provisioning manifest, install
   provenance, strict/deep health checks, baseline fingerprints, deterministic
   `dev-fast` and `release-clean` profiles, and a consumer preflight API.
