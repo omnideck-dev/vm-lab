@@ -48,6 +48,10 @@ a user LaunchAgent that runs `caffeinate -dimsu` while the dedicated test user i
 logged in, keeping the physical lane reachable during long unattended suites.
 Unlock the dedicated user's GUI session once before a native run; status,
 verification, and strict doctor checks reject a locked session immediately.
+The bootstrap also installs a context-scoped Downloads consent helper. Candidate
+DMGs are ad-hoc signed and can receive a new CDHash each build, so native tests
+use that helper around their first download instead of relying on stale TCC
+state from an earlier candidate.
 
 Run the strict preflight before using a lane. Every command that can touch a guest
 must execute under one lab-owned lease:

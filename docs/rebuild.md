@@ -25,6 +25,11 @@ Capture the controller-owned manifest immediately after accepting a baseline:
 ./lab.sh doctor --strict
 ```
 
+The capture records the whole-manifest hash for diagnostics and a canonical
+hash of the selected VM's image and provisioning contract for validation.
+Changing profiles, retention, hosts, or another VM does not make this baseline
+stale. Changing this VM's contract does.
+
 `doctor --deep` additionally re-hashes the clean golden disks. Run it after a
 rebuild or suspected storage corruption; routine consumers use `--strict` and
 validate the recorded manifest without paying that hashing cost.

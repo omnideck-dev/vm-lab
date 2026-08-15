@@ -35,6 +35,7 @@ install -m 0644 "$source_dir/automation/windows/Autounattend.xml" "$target/autom
 install -m 0644 "$source_dir/automation/windows/provision.ps1" "$target/automation/windows/provision.ps1"
 install -m 0755 "$source_dir/automation/macos/prepare-host.sh" "$target/automation/macos/prepare-host.sh"
 install -m 0755 "$source_dir/automation/macos/reset-host.sh" "$target/automation/macos/reset-host.sh"
+install -m 0755 "$source_dir/automation/macos/allow-downloads.sh" "$target/automation/macos/allow-downloads.sh"
 install -m 0755 "$source_dir/automation/macos/run-suite.sh" "$target/automation/macos/run-suite.sh"
 install -m 0755 "$source_dir/automation/macos/install-driver.sh" "$target/automation/macos/install-driver.sh"
 install -m 0755 "$source_dir/automation/macos/install-input-extension.sh" "$target/automation/macos/install-input-extension.sh"
@@ -54,6 +55,7 @@ root = os.path.dirname(path)
 installed = [
     "VERSION", "lab.sh", "lab-engine.sh", "lab-host.sh", "lab-manifest.json",
     "automation/macos/prepare-host.sh", "automation/macos/reset-host.sh",
+    "automation/macos/allow-downloads.sh",
     "automation/macos/run-suite.sh",
     "automation/macos/bootstrap-host.sh", "automation/macos/install-driver.sh",
     "automation/macos/install-input-extension.sh",
