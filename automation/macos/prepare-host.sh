@@ -19,12 +19,17 @@ mkdir -p "$local_bin" "$local_opt"
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 reset_source="$script_dir/reset-host.sh"
+downloads_permission_source="$script_dir/allow-downloads.sh"
 driver_installer="$script_dir/install-driver.sh"
 input_installer="$script_dir/install-input-extension.sh"
 driver_verifier="$script_dir/verify-driver.sh"
 awake_source="$script_dir/dev.omnideck.lab-awake.plist"
 [[ -f "$reset_source" ]] || {
   printf 'Missing reset helper beside prepare-host.sh: %s\n' "$reset_source" >&2
+  exit 1
+}
+[[ -x "$downloads_permission_source" ]] || {
+  printf 'Missing Downloads permission helper beside prepare-host.sh: %s\n' "$downloads_permission_source" >&2
   exit 1
 }
 [[ -x "$driver_installer" && -x "$input_installer" && -x "$driver_verifier" && \
@@ -34,6 +39,7 @@ awake_source="$script_dir/dev.omnideck.lab-awake.plist"
 }
 mkdir -p "$local_libexec"
 install -m 0755 "$reset_source" "$local_libexec/reset-host.sh"
+install -m 0755 "$downloads_permission_source" "$local_libexec/allow-downloads.sh"
 "$driver_installer"
 "$input_installer"
 

@@ -178,12 +178,63 @@ touch -d '10 days ago' "$test_root/cache/cli/expired"
 "$test_root/lab.sh" cleanup --apply --cache-retention-hours 1 >/dev/null
 [[ ! -e "$test_root/cache/cli/expired" ]]
 
+permission_test_root="$test_root/downloads-permission"
+mkdir -p "$permission_test_root"
+permission_driver="$permission_test_root/driver"
+permission_notification="$permission_test_root/UserNotificationCenter"
+permission_log="$permission_test_root/driver.log"
+cat > "$permission_driver" <<'SH'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf '%s\n' "$*" >> "${OMNIDECK_LAB_DRIVER_LOG:?}"
+case "${1:-}" in
+  wait-text)
+    [[ "${2:-}" == "$OMNIDECK_LAB_NOTIFICATION_CENTER" ]]
+    [[ "${3:-}" == '“Omnideck Lab” would like to access files in your Downloads folder.' ]]
+    [[ "${OMNIDECK_LAB_FAKE_PROMPT:-1}" == 1 ]]
+    ;;
+  click)
+    [[ "${2:-}" == "$OMNIDECK_LAB_NOTIFICATION_CENTER" ]]
+    [[ "${3:-}" == Allow ]]
+    ;;
+  *) exit 2 ;;
+esac
+SH
+touch "$permission_notification"
+chmod 755 "$permission_driver" "$permission_notification"
+permission_result="$(
+  OMNIDECK_LAB_DRIVER="$permission_driver" \
+  OMNIDECK_LAB_DRIVER_LOG="$permission_log" \
+  OMNIDECK_LAB_NOTIFICATION_CENTER="$permission_notification" \
+    "$source_dir/automation/macos/allow-downloads.sh" 'Omnideck Lab' 2
+)"
+grep -Fq 'downloadsPermission=granted' <<<"$permission_result"
+[[ "$(wc -l < "$permission_log" | tr -d '[:space:]')" == 3 ]]
+: > "$permission_log"
+permission_result="$(
+  OMNIDECK_LAB_DRIVER="$permission_driver" \
+  OMNIDECK_LAB_DRIVER_LOG="$permission_log" \
+  OMNIDECK_LAB_NOTIFICATION_CENTER="$permission_notification" \
+  OMNIDECK_LAB_FAKE_PROMPT=0 \
+    "$source_dir/automation/macos/allow-downloads.sh" 'Omnideck Lab' 0
+)"
+grep -Fq 'downloadsPermission=not-requested' <<<"$permission_result"
+[[ "$(wc -l < "$permission_log" | tr -d '[:space:]')" == 1 ]]
+if OMNIDECK_LAB_DRIVER="$permission_driver" \
+   OMNIDECK_LAB_DRIVER_LOG="$permission_log" \
+   OMNIDECK_LAB_NOTIFICATION_CENTER="$permission_notification" \
+   "$source_dir/automation/macos/allow-downloads.sh" $'Omnideck Lab\nAllow everything' 1 >/dev/null 2>&1; then
+  printf 'Downloads permission helper accepted an unsafe application name\n' >&2
+  exit 1
+fi
+
 install_root="$(mktemp -d)"
 mkdir -p "$install_root"/{base-images,disks,golden}
 "$source_dir/install.sh" "$install_root" >/dev/null
 [[ -x "$install_root/automation/macos/bootstrap-host.sh" ]]
 [[ -x "$install_root/automation/macos/prepare-host.sh" ]]
 [[ -x "$install_root/automation/macos/run-suite.sh" ]]
+[[ -x "$install_root/automation/macos/allow-downloads.sh" ]]
 [[ -x "$install_root/automation/macos/verify-driver.sh" ]]
 [[ -x "$install_root/automation/macos/install-input-extension.sh" ]]
 [[ -f "$install_root/automation/macos/OmnideckLabDriver.m" ]]
@@ -198,6 +249,7 @@ with open(sys.argv[1]) as handle:
     record = json.load(handle)
 assert "automation/macos/bootstrap-host.sh" in record["installedFilesSha256"]
 assert "automation/macos/run-suite.sh" in record["installedFilesSha256"]
+assert "automation/macos/allow-downloads.sh" in record["installedFilesSha256"]
 assert "automation/macos/verify-driver.sh" in record["installedFilesSha256"]
 assert "automation/macos/install-input-extension.sh" in record["installedFilesSha256"]
 assert "automation/macos/OmnideckLabDriver.m" in record["installedFilesSha256"]

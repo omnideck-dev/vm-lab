@@ -112,6 +112,8 @@ registry_config="$(podman machine ssh omnideck-runtime cat /var/home/core/.confi
 }
 reset_helper="$HOME/.local/libexec/omnideck-lab/reset-host.sh"
 [[ -x "$reset_helper" ]] || { printf "The disposable-host reset helper is missing; rerun prepare-host.sh.\n" >&2; exit 1; }
+downloads_permission_helper="$HOME/.local/libexec/omnideck-lab/allow-downloads.sh"
+[[ -x "$downloads_permission_helper" ]] || { printf "The Downloads permission helper is missing; rerun prepare-host.sh.\n" >&2; exit 1; }
 driver="$HOME/Applications/Omnideck Lab Driver.app/Contents/MacOS/omnideck-lab-driver"
 [[ -x "$driver" ]] || { printf "The Accessibility driver is missing; rerun the macOS bootstrap.\n" >&2; exit 1; }
 "$reset_helper" verify runtime-ready >/dev/null

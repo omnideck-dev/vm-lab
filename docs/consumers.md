@@ -41,6 +41,15 @@ The expensive Podman installation and `omnideck-runtime` Linux machine stay
 warm. This is clean-application coverage, not clean-OS or Gatekeeper-download
 coverage.
 
+Ad-hoc candidate bundles have a CDHash-based designated requirement, so macOS
+may ask for Downloads access again when the candidate bytes change. Native
+consumers start `~/.local/libexec/omnideck-lab/allow-downloads.sh "Omnideck
+Lab" TIMEOUT` immediately before initiating the first download. The helper
+waits for the exact app-named Downloads alert in `UserNotificationCenter` and
+presses `Allow`; it also succeeds with `downloadsPermission=not-requested` when
+the current candidate is already authorized. It never clicks an unqualified
+privacy prompt.
+
 The canonical controller-side entry point is
 `automation/macos/run-suite.sh --cli-repo PATH --desktop-repo PATH [--artifact
 PATH.dmg]`. It lease-serializes an idempotent host bootstrap, selects the newest

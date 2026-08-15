@@ -19,7 +19,7 @@ fi
 }
 
 [[ -x "$host_engine" ]] || { printf 'Missing physical-host controller: %s\n' "$host_engine" >&2; exit 1; }
-for source in prepare-host.sh reset-host.sh install-driver.sh install-input-extension.sh verify-driver.sh OmnideckLabDriver.m OmnideckLabInput.m dev.omnideck.lab-awake.plist; do
+for source in prepare-host.sh reset-host.sh allow-downloads.sh install-driver.sh install-input-extension.sh verify-driver.sh OmnideckLabDriver.m OmnideckLabInput.m dev.omnideck.lab-awake.plist; do
   [[ -f "$script_dir/$source" ]] || { printf 'Missing macOS bootstrap input: %s\n' "$script_dir/$source" >&2; exit 1; }
 done
 
@@ -31,11 +31,11 @@ remote_root="$($host_engine run "$host" /usr/bin/mktemp -d /private/tmp/omnideck
 cleanup() { "$host_engine" run "$host" /bin/rm -rf -- "$remote_root" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-for source in prepare-host.sh reset-host.sh install-driver.sh install-input-extension.sh verify-driver.sh OmnideckLabDriver.m OmnideckLabInput.m dev.omnideck.lab-awake.plist; do
+for source in prepare-host.sh reset-host.sh allow-downloads.sh install-driver.sh install-input-extension.sh verify-driver.sh OmnideckLabDriver.m OmnideckLabInput.m dev.omnideck.lab-awake.plist; do
   "$host_engine" copy-to "$host" "$script_dir/$source" "$remote_root/$source"
 done
 "$host_engine" run "$host" /bin/chmod 755 \
-  "$remote_root/prepare-host.sh" "$remote_root/reset-host.sh" \
+  "$remote_root/prepare-host.sh" "$remote_root/reset-host.sh" "$remote_root/allow-downloads.sh" \
   "$remote_root/install-driver.sh" "$remote_root/install-input-extension.sh" "$remote_root/verify-driver.sh"
 "$host_engine" run "$host" /bin/bash "$remote_root/prepare-host.sh"
 "$host_engine" verify "$host"
