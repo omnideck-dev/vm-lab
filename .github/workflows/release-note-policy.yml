@@ -3,6 +3,7 @@ name: Release-note policy
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   merge_group:
   push:
     branches: [main]
