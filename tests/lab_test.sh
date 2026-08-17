@@ -234,6 +234,7 @@ mkdir -p "$install_root"/{base-images,disks,golden}
 [[ -x "$install_root/automation/macos/bootstrap-host.sh" ]]
 [[ -x "$install_root/automation/macos/prepare-host.sh" ]]
 [[ -x "$install_root/automation/macos/run-suite.sh" ]]
+[[ -x "$install_root/automation/macos/reset-host.sh" ]]
 [[ -x "$install_root/automation/macos/allow-downloads.sh" ]]
 [[ -x "$install_root/automation/macos/verify-driver.sh" ]]
 [[ -x "$install_root/automation/macos/install-input-extension.sh" ]]
@@ -243,12 +244,14 @@ mkdir -p "$install_root"/{base-images,disks,golden}
 grep -Fq 'lease "$host" macos-bootstrap' "$install_root/automation/macos/bootstrap-host.sh"
 grep -Fq 'Using newest cached Desktop DMG' "$install_root/automation/macos/run-suite.sh"
 grep -Fq "'lanes':{'cli':cli_status,'desktop':desktop_status}" "$install_root/automation/macos/run-suite.sh"
+grep -Fq 'for desktop_executable in omnideck-desktop omnideck' "$install_root/automation/macos/reset-host.sh"
 python3 - "$install_root/controller-install.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as handle:
     record = json.load(handle)
 assert "automation/macos/bootstrap-host.sh" in record["installedFilesSha256"]
 assert "automation/macos/run-suite.sh" in record["installedFilesSha256"]
+assert "automation/macos/reset-host.sh" in record["installedFilesSha256"]
 assert "automation/macos/allow-downloads.sh" in record["installedFilesSha256"]
 assert "automation/macos/verify-driver.sh" in record["installedFilesSha256"]
 assert "automation/macos/install-input-extension.sh" in record["installedFilesSha256"]
