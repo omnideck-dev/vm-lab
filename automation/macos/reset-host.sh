@@ -116,7 +116,7 @@ verify_clean() {
 }
 
 reset_host() {
-  local path podman name
+  local path podman name desktop_executable
   if [[ -e "$application" ]] && ! application_is_owned; then
     printf 'Refusing to remove an unexpected application at %s.\n' "$application" >&2
     exit 1
@@ -128,16 +128,17 @@ reset_host() {
     }
   fi
 
-  if [[ -x "$application/Contents/MacOS/omnideck" ]]; then
-    pkill -f "^$application/Contents/MacOS/omnideck$" >/dev/null 2>&1 || true
+  for desktop_executable in omnideck-desktop omnideck; do
+    [[ -x "$application/Contents/MacOS/$desktop_executable" ]] || continue
+    pkill -f "^$application/Contents/MacOS/$desktop_executable$" >/dev/null 2>&1 || true
     for _ in 1 2 3 4 5; do
-      pgrep -f "^$application/Contents/MacOS/omnideck$" >/dev/null 2>&1 || break
+      pgrep -f "^$application/Contents/MacOS/$desktop_executable$" >/dev/null 2>&1 || break
       sleep 1
     done
-    if pgrep -f "^$application/Contents/MacOS/omnideck$" >/dev/null 2>&1; then
-      pkill -KILL -f "^$application/Contents/MacOS/omnideck$" >/dev/null 2>&1 || true
+    if pgrep -f "^$application/Contents/MacOS/$desktop_executable$" >/dev/null 2>&1; then
+      pkill -KILL -f "^$application/Contents/MacOS/$desktop_executable$" >/dev/null 2>&1 || true
     fi
-  fi
+  done
   pkill -f '^/private/tmp/omnideck-cli-macos-[[:alnum:]_.-]*/bin/omnideck([[:space:]]|$)' >/dev/null 2>&1 || true
   pkill -f '^/tmp/omnideck-cli-macos-[[:alnum:]_.-]*/bin/omnideck([[:space:]]|$)' >/dev/null 2>&1 || true
 
