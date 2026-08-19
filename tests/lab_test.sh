@@ -36,15 +36,10 @@ python3 - "$test_root/lab-manifest.json" "$test_root/golden/manifests/appimage-d
 import hashlib, json, sys
 with open(sys.argv[1], "rb") as handle:
     config_sha = hashlib.sha256(handle.read()).hexdigest()
-with open(sys.argv[1]) as handle:
-    manifest = json.load(handle)
-contract = {"schemaVersion": 1, "vm": "appimage", "vmSpec": manifest["vms"]["appimage"]}
-contract_sha = hashlib.sha256(json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 record = {
         "schemaVersion": 1,
         "vm": "appimage",
         "labManifestSha256": config_sha,
-        "provenanceContractSha256": contract_sha,
         "diskSha256": "a" * 64,
         "uefiVarsSha256": "b" * 64,
         "tpmTreeSha256": "none",
@@ -59,28 +54,6 @@ PY
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 "$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
-python3 - "$test_root/golden/manifests/appimage-clean.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-with open(path) as handle:
-    record = json.load(handle)
-record.pop("provenanceContractSha256")
-with open(path, "w") as handle:
-    json.dump(record, handle)
-PY
-"$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
-  python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
-python3 - "$test_root/golden/manifests/appimage-clean.json" "$test_root/golden/manifests/appimage-desktop-e2e-v2.json" <<'PY'
-import json, sys
-path, source = sys.argv[1:]
-with open(path) as handle:
-    record = json.load(handle)
-with open(source) as handle:
-    current = json.load(handle)
-record["provenanceContractSha256"] = current["provenanceContractSha256"]
-with open(path, "w") as handle:
-    json.dump(record, handle)
-PY
 python3 - "$test_root/lab-manifest.json" <<'PY'
 import json, sys
 path = sys.argv[1]
@@ -91,7 +64,7 @@ with open(path, "w") as handle:
     json.dump(manifest, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
-"$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
+"$test_root/lab.sh" preflight desktop dev-fast --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 python3 - "$test_root/lab-manifest.json" <<'PY'
 import json, sys
@@ -103,11 +76,22 @@ with open(path, "w") as handle:
     json.dump(manifest, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
-if changed_contract_result="$("$test_root/lab.sh" preflight cli release-clean --lanes appimage --json)"; then
-  printf 'VM contract change unexpectedly preserved provenance\n' >&2
+"$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
+  python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
+python3 - "$test_root/golden/manifests/appimage-clean.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as handle:
+    record = json.load(handle)
+record["diskSha256"] = "not-a-digest"
+with open(path, "w") as handle:
+    json.dump(record, handle)
+PY
+if malformed_fingerprint_result="$("$test_root/lab.sh" preflight cli release-clean --lanes appimage --json)"; then
+  printf 'Malformed baseline fingerprint unexpectedly passed preflight\n' >&2
   exit 1
 fi
-python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is False' <<<"$changed_contract_result"
+python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is False' <<<"$malformed_fingerprint_result"
 "$test_root/lab.sh" preflight cli release-clean --lanes macos-arm64 --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 if "$test_root/lab.sh" start ubuntu >/dev/null 2>&1; then
@@ -116,6 +100,9 @@ if "$test_root/lab.sh" start ubuntu >/dev/null 2>&1; then
 fi
 "$test_root/lab.sh" lease ubuntu test successful -- bash -c 'test "$OMNIDECK_VM_LAB_VM" = appimage'
 [[ ! -e "$test_root/discarded/runs/successful-appimage" ]]
+"$test_root/lab.sh" lease ubuntu test successful-cleanup --cleanup-baseline clean -- true
+grep -Fxq 'reset appimage clean' "$test_root/runtime/fake-actions.log"
+[[ ! -e "$test_root/discarded/runs/successful-cleanup-appimage" ]]
 "$test_root/lab.sh" lease macos test host-successful -- "$test_root/lab.sh" run macos true
 [[ ! -e "$test_root/discarded/runs/host-successful-macos-arm64" ]]
 if "$test_root/lab.sh" lease macos test host-cleanup-failed --cleanup-baseline runtime-ready -- bash -c 'exit 7'; then
@@ -123,10 +110,11 @@ if "$test_root/lab.sh" lease macos test host-cleanup-failed --cleanup-baseline r
   exit 1
 fi
 grep -Fxq 'reset macos-arm64 runtime-ready' "$test_root/runtime/fake-actions.log"
-if "$test_root/lab.sh" lease debian test failed -- bash -c 'exit 9'; then
+if "$test_root/lab.sh" lease debian test failed --cleanup-baseline clean -- bash -c 'exit 9'; then
   printf 'failing leased command unexpectedly succeeded\n' >&2
   exit 1
 fi
+grep -Fxq 'reset deb clean' "$test_root/runtime/fake-actions.log"
 [[ -f "$test_root/discarded/runs/failed-deb/metadata.json" ]]
 
 "$test_root/lab.sh" lease fedora test held -- bash -c 'sleep 2' &
