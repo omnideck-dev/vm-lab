@@ -327,7 +327,7 @@ lease_command() {
   if [[ -n "$lease_signal" && "$result" == 0 ]]; then
     case "$lease_signal" in INT) result=130 ;; TERM) result=143 ;; HUP) result=129 ;; esac
   fi
-  if [[ "$kind" == vm && -n "$cleanup_baseline" && "$result" -ge 128 ]]; then
+  if [[ "$kind" == vm && -n "$cleanup_baseline" ]]; then
     if "$ENGINE" status "$vm" | grep -Eq "^${vm} running "; then
       "$ENGINE" stop "$vm" || result=1
     fi
@@ -717,25 +717,8 @@ tree_digest() {
   done | sha256sum | awk '{print $1}'
 }
 
-provenance_contract_sha() {
-  local vm="$1"
-  python3 - "$MANIFEST" "$vm" <<'PY'
-import hashlib, json, sys
-path, vm = sys.argv[1:]
-with open(path) as handle:
-    manifest = json.load(handle)
-contract = {
-    "schemaVersion": 1,
-    "vm": vm,
-    "vmSpec": manifest["vms"][vm],
-}
-encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
-print(hashlib.sha256(encoded).hexdigest())
-PY
-}
-
 provenance_capture_one() {
-  local vm="$1" name="$2" destination disk_sha vars_sha tpm_sha contract_sha
+  local vm="$1" name="$2" destination disk_sha vars_sha tpm_sha
   golden_paths "$vm" "$name"
   [[ -f "$GOLDEN_CAPTURE_DISK" ]] || { printf 'Missing golden disk: %s\n' "$GOLDEN_CAPTURE_DISK" >&2; return 1; }
   [[ -f "$GOLDEN_CAPTURE_VARS" ]] || { printf 'Missing golden UEFI state: %s\n' "$GOLDEN_CAPTURE_VARS" >&2; return 1; }
@@ -747,12 +730,11 @@ provenance_capture_one() {
   disk_sha="$(sha256sum "$GOLDEN_CAPTURE_DISK" | awk '{print $1}')"
   vars_sha="$(sha256sum "$GOLDEN_CAPTURE_VARS" | awk '{print $1}')"
   tpm_sha="$(tree_digest "$GOLDEN_CAPTURE_TPM")"
-  contract_sha="$(provenance_contract_sha "$vm")"
   mkdir -p "$LAB_ROOT/golden/manifests"
   destination="$LAB_ROOT/golden/manifests/${vm}-${name}.json"
-  python3 - "$destination" "$vm" "$(distro_name "$vm")" "$name" "$disk_sha" "$vars_sha" "$tpm_sha" "$LAB_VERSION" "$MANIFEST" "$GOLDEN_CAPTURE_DISK" "$contract_sha" <<'PY'
+  python3 - "$destination" "$vm" "$(distro_name "$vm")" "$name" "$disk_sha" "$vars_sha" "$tpm_sha" "$LAB_VERSION" "$MANIFEST" "$GOLDEN_CAPTURE_DISK" <<'PY'
 import datetime, hashlib, json, os, subprocess, sys, tempfile
-path, vm, distro, name, disk_sha, vars_sha, tpm_sha, version, config_path, disk_path, contract_sha = sys.argv[1:]
+path, vm, distro, name, disk_sha, vars_sha, tpm_sha, version, config_path, disk_path = sys.argv[1:]
 config_sha = hashlib.sha256(open(config_path, "rb").read()).hexdigest() if os.path.exists(config_path) else None
 qemu_info = json.loads(subprocess.check_output(["qemu-img", "info", "--output=json", disk_path]))
 record = {
@@ -764,7 +746,6 @@ record = {
     "provenance": "captured-current-state",
     "controllerVersion": version,
     "labManifestSha256": config_sha,
-    "provenanceContractSha256": contract_sha,
     "diskSha256": disk_sha,
     "uefiVarsSha256": vars_sha,
     "tpmTreeSha256": tpm_sha,
@@ -804,24 +785,19 @@ provenance_command() {
 
 provenance_metadata_valid() {
   local path="$1" vm="$2" baseline="$3"
-  local contract_sha
-  contract_sha="$(provenance_contract_sha "$vm")"
-  python3 - "$path" "$MANIFEST" "$vm" "$baseline" "$contract_sha" <<'PY'
-import hashlib, json, re, sys
-path, config_path, vm, baseline, contract_sha = sys.argv[1:]
+  python3 - "$path" "$vm" "$baseline" <<'PY'
+import json, re, sys
+path, vm, baseline = sys.argv[1:]
 try:
     with open(path) as handle:
         record = json.load(handle)
-    with open(config_path, "rb") as handle:
-        config_sha = hashlib.sha256(handle.read()).hexdigest()
     assert record["schemaVersion"] == 1
     assert record["vm"] == vm
     assert record["baseline"] == baseline
+    if "labManifestSha256" in record:
+        assert re.fullmatch(r"[0-9a-f]{64}", record["labManifestSha256"])
     if "provenanceContractSha256" in record:
-        assert record["provenanceContractSha256"] == contract_sha
-    else:
-        # Compatibility for provenance captured before contract-scoped hashes.
-        assert record["labManifestSha256"] == config_sha
+        assert re.fullmatch(r"[0-9a-f]{64}", record["provenanceContractSha256"])
     assert re.fullmatch(r"[0-9a-f]{64}", record["diskSha256"])
     assert re.fullmatch(r"[0-9a-f]{64}", record["uefiVarsSha256"])
     assert record["tpmTreeSha256"] == "none" or re.fullmatch(r"[0-9a-f]{64}", record["tpmTreeSha256"])

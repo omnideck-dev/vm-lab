@@ -67,7 +67,9 @@ before doing expensive work or acquiring a guest.
 `release-clean` resolves VM lanes to `clean` and the physical Mac to `ready`;
 the Mac consumer then requests the stronger `runtime-ready` cleanup contract on
 its lease. `dev-fast` never silently falls back from its declared mapping.
-Every accepted clean or named baseline has a SHA-256 provenance manifest under
-`golden/manifests/`. Provenance binds the selected VM's canonical image and
-provisioning contract. Profiles, retention policy, physical hosts, and other VM
-definitions do not invalidate an unchanged baseline.
+Every accepted clean or named baseline has a SHA-256 fingerprint manifest under
+`golden/manifests/`. The record describes the baseline disk, UEFI state, TPM
+state, and QEMU image metadata; it is not coupled to the mutable controller
+manifest. `doctor` validates the current controller and provisioning contract
+separately, while `doctor --deep` re-hashes accepted clean images when byte-level
+integrity must be re-established.

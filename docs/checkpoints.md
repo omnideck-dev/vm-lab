@@ -38,7 +38,8 @@ public snapshot interface.
 
 Test the checkpoint first with an explicit `preflight --baseline NAME`. If it is
 then selected by a shared profile, update `lab-manifest.json` and run `install.sh`
-against the deployed lab. Recapture provenance only when that VM's image or
-provisioning contract changes. Profile-only changes do not invalidate baseline
-provenance. Then run `lab.sh doctor --strict` and the exact consumer/profile
-`lab.sh preflight`.
+against the deployed lab. Recapture its fingerprint only when the checkpoint's
+disk, UEFI, or TPM state changes. Controller, profile, and provisioning-source
+changes do not rewrite or invalidate an unchanged checkpoint record. Validate
+those current inputs with `lab.sh doctor --strict`, then run the exact
+consumer/profile `lab.sh preflight`.
