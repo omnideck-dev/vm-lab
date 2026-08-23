@@ -11,6 +11,9 @@
   reject deterministic PolicyKit automation.
 - Versioned the stronger certification contract so metadata preflight rejects
   certificates created before credential and live-runtime verification.
+- Made the native macOS permission probe wait for its app-bundle screenshot
+  helper to finish, preventing successful checks from racing temporary capture
+  cleanup and being reported as false permission failures.
 
 ## 2026-08-13
 
