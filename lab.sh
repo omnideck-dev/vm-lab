@@ -36,6 +36,7 @@ Ownership and lifecycle:
   artifact-path OWNER SUITE RUN_ID
   cache-path OWNER KEY
   preflight SUITE PROFILE [--lanes CSV] [--json]
+  baselines build|certify PROFILE [--lanes CSV]
 
 Guest commands (must run inside `lease`):
   init [VM]              Initialize one or all guests
@@ -47,6 +48,7 @@ Guest commands (must run inside `lease`):
   run VM COMMAND...      Run a guest command
   copy-to VM SRC DEST    Copy one file into the guest
   copy-from VM SRC DEST  Copy one file out of the guest
+  stage TARGET DIR DEST  Transfer and verify one compressed payload bundle
   send-keys VM KEY...    Send QEMU console keys
   screenshot VM DEST     Capture the graphical console
   viewer VM              Open the SPICE viewer
@@ -320,7 +322,9 @@ lease_command() {
   trap 'lease_signal=TERM' TERM
   trap 'lease_signal=HUP' HUP
   set +e
-  "$@"
+  # Keep the controller's advisory lock in this shell only. Long-lived guest
+  # processes must not inherit it and strand the lane if the owner is killed.
+  "$@" 9>&-
   result=$?
   set -e
   trap - INT TERM HUP
@@ -599,7 +603,7 @@ inventory_command() {
 }
 
 baseline_command() {
-  local vm suite candidate
+  local vm suite
   vm="$(canonical_target "${1:?TARGET is required}")"
   suite="${2:?SUITE is required}"
   if [[ "$(target_kind "$vm")" == host ]]; then
@@ -607,21 +611,7 @@ baseline_command() {
     return
   fi
   case "$suite" in
-    cli) printf 'clean\n' ;;
-    desktop)
-      if [[ "$vm" == atomic ]]; then
-        printf 'clean\n'
-        return
-      fi
-      for candidate in desktop-e2e-v2 podman-ready clean; do
-        if "$ENGINE" snapshots "$vm" | grep -Fx "$candidate" >/dev/null; then
-          printf '%s\n' "$candidate"
-          return
-        fi
-      done
-      printf 'No usable Desktop baseline for %s.\n' "$vm" >&2
-      return 1
-      ;;
+    cli|desktop) profile_command product-ready "$vm" ;;
     *) printf 'Unknown suite: %s\n' "$suite" >&2; return 2 ;;
   esac
 }
@@ -646,10 +636,10 @@ capabilities_command() {
   local format="${1:---json}"
   case "$format" in
     --json)
-      printf '{"schemaVersion":1,"controllerApi":3,"labVersion":"%s","features":["artifact-path","cache-path","capabilities","cleanup","disposable-hosts","evidence-v1","lease-cleanup","paths","preflight","profiles","provenance","remote-hosts","strict-doctor"]}\n' "$LAB_VERSION"
+      printf '{"schemaVersion":1,"controllerApi":3,"labVersion":"%s","features":["artifact-path","cache-path","capabilities","cleanup","disposable-hosts","evidence-v1","golden-browser-contract","lease-cleanup","paths","preflight","profiles","provenance","remote-hosts","stage-v1","strict-doctor"]}\n' "$LAB_VERSION"
       ;;
     --text)
-      printf '%s\n' artifact-path cache-path capabilities cleanup disposable-hosts evidence-v1 lease-cleanup paths preflight profiles provenance remote-hosts strict-doctor
+      printf '%s\n' artifact-path cache-path capabilities cleanup disposable-hosts evidence-v1 golden-browser-contract lease-cleanup paths preflight profiles provenance remote-hosts stage-v1 strict-doctor
       ;;
     *) printf 'Unknown capabilities format: %s\n' "$format" >&2; return 2 ;;
   esac
@@ -691,6 +681,245 @@ cache_path_command() {
   validate_identifier owner "$owner"
   validate_identifier cache-key "$key"
   printf '%s/%s/%s\n' "$CACHE_ROOT" "$owner" "$key"
+}
+
+certification_contract() {
+  case "$1" in
+    product-ready|dev-fast) printf 'product-ready\n' ;;
+    onboarding-clean|release-clean) printf 'onboarding-clean\n' ;;
+    *) printf 'Profile has no certification contract: %s\n' "$1" >&2; return 2 ;;
+  esac
+}
+
+disposable_linux_password_hash() {
+  printf '%s\n' '$6$SRTdHbBlz5uKrH7M$bIpFx8CSO1te/doj.Tk445gUl7SzvU8./gnsmJHIpd9U/9850k/QNRQYtS8pvn8/N061rjBi9xvBnp1UAUHBJ.'
+}
+
+write_certification() {
+  local vm="$1" baseline="$2" contract="$3" provenance destination disk_sha
+  provenance="$LAB_ROOT/golden/manifests/${vm}-${baseline}.json"
+  [[ -f "$provenance" ]] || { printf 'Capture provenance before certification: %s/%s\n' "$vm" "$baseline" >&2; return 1; }
+  disk_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["diskSha256"])' "$provenance")"
+  destination="$LAB_ROOT/golden/manifests/${vm}-${baseline}.certification.json"
+  python3 - "$destination" "$vm" "$baseline" "$contract" "$disk_sha" "$LAB_VERSION" <<'PY'
+import datetime, json, os, sys, tempfile
+path, vm, baseline, contract, disk_sha, version = sys.argv[1:]
+record = {
+    "schemaVersion": 2,
+    "contractRevision": 2,
+    "vm": vm,
+    "baseline": baseline,
+    "contract": contract,
+    "provenanceDiskSha256": disk_sha,
+    "controllerVersion": version,
+    "certifiedAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+}
+fd, temporary = tempfile.mkstemp(prefix=".certification.", dir=os.path.dirname(path), text=True)
+with os.fdopen(fd, "w") as handle:
+    json.dump(record, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+os.replace(temporary, path)
+PY
+}
+
+certification_metadata_valid() {
+  local path="$1" provenance="$2" vm="$3" baseline="$4" contract="$5"
+  python3 - "$path" "$provenance" "$vm" "$baseline" "$contract" <<'PY'
+import json, re, sys
+path, provenance_path, vm, baseline, contract = sys.argv[1:]
+try:
+    with open(path) as handle:
+        record = json.load(handle)
+    with open(provenance_path) as handle:
+        provenance = json.load(handle)
+    assert record["schemaVersion"] == 2
+    assert record["contractRevision"] == 2
+    assert record["vm"] == vm
+    assert record["baseline"] == baseline
+    assert record["contract"] == contract
+    assert re.fullmatch(r"[0-9a-f]{64}", record["provenanceDiskSha256"])
+    assert record["provenanceDiskSha256"] == provenance["diskSha256"]
+except (AssertionError, KeyError, OSError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+}
+
+build_baseline_one() {
+  local vm="$1" profile="$2" source_baseline destination recipe recipe_dir run_id
+  destination="$(profile_command "$profile" "$vm")"
+  if "$ENGINE" snapshots "$vm" | grep -Fx "$destination" >/dev/null; then
+    printf '%s/%s already exists; skipping build.\n' "$vm" "$destination"
+    return
+  fi
+  case "$profile" in
+    onboarding-clean)
+      case "$vm" in
+        appimage) source_baseline=desktop-e2e-v2 ;;
+        deb) source_baseline=desktop-e2e-v7 ;;
+        rpm|atomic) source_baseline=desktop-e2e-v3 ;;
+      esac
+      if ! "$ENGINE" snapshots "$vm" | grep -Fx "$source_baseline" >/dev/null; then
+        source_baseline=clean
+      fi
+      recipe=onboarding-clean-linux.sh
+      ;;
+    product-ready)
+      source_baseline="$(profile_command onboarding-clean "$vm")"
+      recipe=product-ready-linux.sh
+      ;;
+  esac
+  "$ENGINE" snapshots "$vm" | grep -Fx "$source_baseline" >/dev/null || {
+    printf 'Missing source baseline %s/%s; build it first.\n' "$vm" "$source_baseline" >&2
+    return 1
+  }
+  recipe_dir="$(mktemp -d "$RUNTIME_DIR/.baseline-recipe.XXXXXX")"
+  install -m 0755 "$LAB_ROOT/automation/baselines/$recipe" "$recipe_dir/$recipe"
+  if [[ "$profile" == onboarding-clean ]]; then
+    install -m 0755 "$LAB_ROOT/automation/configure-firefox-desktop.sh" "$recipe_dir/configure-firefox-desktop.sh"
+  fi
+  run_id="baseline-build-${profile}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  "$0" lease "$vm" baseline-build "$run_id" --cleanup-baseline "$source_baseline" -- \
+    bash -c 'set -Eeuo pipefail
+      lab="$1"; vm="$2"; source_baseline="$3"; destination="$4"; recipe_dir="$5"; recipe="$6"
+      "$lab" reset "$vm" "$source_baseline"
+      "$lab" start "$vm"
+      "$lab" wait "$vm"
+      "$lab" stage "$vm" "$recipe_dir" /tmp/omnideck-baseline-recipe
+      "$lab" run "$vm" sudo bash "/tmp/omnideck-baseline-recipe/$recipe"
+      "$lab" verify "$vm"
+      "$lab" stop "$vm"
+      "$lab" snapshot "$vm" "$destination"' _ \
+      "$0" "$vm" "$source_baseline" "$destination" "$recipe_dir" "$recipe"
+  provenance_capture_one "$vm" "$destination"
+  rm -rf -- "$recipe_dir"
+}
+
+certify_baseline_one() {
+  local vm="$1" profile="$2" baseline contract run_id kind password_hash
+  baseline="$(profile_command "$profile" "$vm")"
+  contract="$(certification_contract "$profile")"
+  kind="$(target_kind "$vm")"
+  password_hash="$(disposable_linux_password_hash)"
+  run_id="baseline-certify-${profile}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  if [[ "$kind" == host ]]; then
+    "$0" lease "$vm" baseline-certify "$run_id" --cleanup-baseline runtime-ready -- \
+      "$0" verify "$vm"
+    printf '%s/%s satisfies %s.\n' "$vm" "$baseline" "$contract"
+    return
+  fi
+  "$0" lease "$vm" baseline-certify "$run_id" --cleanup-baseline "$baseline" -- \
+    bash -c 'set -Eeuo pipefail
+      lab="$1"; vm="$2"; baseline="$3"; contract="$4"; password_hash="$5"
+      "$lab" reset "$vm" "$baseline"
+      "$lab" start "$vm"
+      "$lab" wait "$vm"
+      "$lab" verify "$vm"
+      if [[ "$vm" != windows ]]; then
+        actual_password_hash="$("$lab" run "$vm" "sudo getent shadow tester | cut -d: -f2")"
+        [[ "$actual_password_hash" == "$password_hash" ]]
+      fi
+      if [[ "$contract" == product-ready ]]; then
+        if [[ "$vm" == windows ]]; then
+          "$lab" run "$vm" powershell.exe -NoProfile -NonInteractive -Command \
+            "if (-not (Get-Command podman -ErrorAction SilentlyContinue)) { throw '\''Podman is missing'\'' }; wsl.exe --shutdown; podman machine start omnideck-runtime; if (\$LASTEXITCODE -ne 0) { throw '\''Podman machine failed to start'\'' }; \$PodmanInfo = podman info; if (\$LASTEXITCODE -ne 0) { throw '\''Podman is not ready'\'' }; podman --version"
+        else
+          "$lab" run "$vm" "command -v podman >/dev/null && podman info >/dev/null"
+        fi
+      elif [[ "$vm" == windows ]]; then
+        "$lab" run "$vm" powershell.exe -NoProfile -NonInteractive -Command "if (Get-Command podman -ErrorAction SilentlyContinue) { throw '\''Podman must be absent'\'' }"
+      elif [[ "$vm" != atomic ]]; then
+        "$lab" run "$vm" "! command -v podman >/dev/null"
+      fi
+      "$lab" stop "$vm"' _ "$0" "$vm" "$baseline" "$contract" "$password_hash"
+  write_certification "$vm" "$baseline" "$contract"
+  printf '%s/%s satisfies %s.\n' "$vm" "$baseline" "$contract"
+}
+
+baselines_command() {
+  local action="${1:?ACTION is required}" profile="${2:?PROFILE is required}" lanes_csv="" requested vm
+  shift 2
+  while (($#)); do
+    case "$1" in
+      --lanes) lanes_csv="${2:?value required}"; shift 2 ;;
+      *) printf 'Unknown baselines argument: %s\n' "$1" >&2; return 2 ;;
+    esac
+  done
+  case "$profile" in onboarding-clean|product-ready) ;; *) printf 'Unknown build profile: %s\n' "$profile" >&2; return 2 ;; esac
+  [[ -n "$lanes_csv" ]] || lanes_csv=appimage,deb,rpm,atomic,windows,macos-arm64
+  local -a lanes=()
+  IFS=, read -r -a lanes <<<"$lanes_csv"
+  for requested in "${lanes[@]}"; do
+    vm="$(canonical_target "$requested")"
+    case "$action" in
+      build)
+        if [[ "$(target_kind "$vm")" == host || "$vm" == windows ]]; then
+          local baseline
+          baseline="$(profile_command "$profile" "$vm")"
+          if [[ "$(target_kind "$vm")" == host ]] || "$ENGINE" snapshots "$vm" | grep -Fx "$baseline" >/dev/null; then
+            printf '%s/%s is externally provisioned; skipping build.\n' "$vm" "$baseline"
+          else
+            printf 'No scripted %s builder is available for %s.\n' "$profile" "$vm" >&2
+            return 1
+          fi
+        else
+          build_baseline_one "$vm" "$profile"
+        fi
+        ;;
+      certify) certify_baseline_one "$vm" "$profile" ;;
+      *) printf 'Unknown baselines action: %s\n' "$action" >&2; return 2 ;;
+    esac
+  done
+}
+
+stage_command() {
+  local target source destination kind archive digest remote_archive extract_script encoded_command file_count byte_count
+  target="$(canonical_target "${1:?TARGET is required}")"
+  source="${2:?DIR is required}"
+  destination="${3:?DEST is required}"
+  require_lease "$target"
+  [[ -d "$source" ]] || { printf 'Stage source is not a directory: %s\n' "$source" >&2; return 1; }
+  kind="$(target_kind "$target")"
+  if [[ "$target" == windows ]]; then
+    [[ "$destination" =~ ^[A-Za-z]:[\\/][A-Za-z0-9._\\/\ -]+$ && "$destination" != *"'"* ]] || {
+      printf 'Windows stage destination must be a safe absolute path: %s\n' "$destination" >&2
+      return 2
+    }
+  else
+    [[ "$destination" == /* && "$destination" != *$'\n'* ]] || {
+      printf 'Stage destination must be an absolute path: %s\n' "$destination" >&2
+      return 2
+    }
+  fi
+
+  archive="$(mktemp "$RUNTIME_DIR/.stage.${target}.XXXXXX.tar.gz")"
+  tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$source" -cf - . | gzip -n > "$archive"
+  digest="$(sha256sum "$archive" | awk '{print $1}')"
+  file_count="$(find "$source" -type f -printf . | wc -c)"
+  byte_count="$(stat -c %s "$archive")"
+
+  if [[ "$target" == windows ]]; then
+    remote_archive="C:/Windows/Temp/omnideck-stage-${digest}.tar.gz"
+    "$ENGINE" copy-to "$target" "$archive" "$remote_archive"
+    extract_script="\$ErrorActionPreference='Stop'; \$ProgressPreference='SilentlyContinue'; \$archive='${remote_archive}'; \$actual=(Get-FileHash -Algorithm SHA256 -LiteralPath \$archive).Hash.ToLowerInvariant(); if (\$actual -ne '${digest}') { throw 'Payload digest mismatch' }; New-Item -ItemType Directory -Force -Path '${destination}' | Out-Null; tar.exe -xzf \$archive -C '${destination}'; if (\$LASTEXITCODE -ne 0) { throw 'Payload extraction failed' }; Remove-Item -Force -LiteralPath \$archive"
+    encoded_command="$(python3 -c 'import base64,sys; print(base64.b64encode(sys.argv[1].encode("utf-16le")).decode())' "$extract_script")"
+    "$ENGINE" run "$target" "powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded_command}"
+  else
+    remote_archive="/tmp/omnideck-stage-${digest}.tar.gz"
+    if [[ "$kind" == host ]]; then
+      "$HOST_ENGINE" copy-to "$target" "$archive" "$remote_archive"
+      printf -v extract_script 'set -Eeuo pipefail; actual="$(shasum -a 256 %q | awk '\''{print $1}'\'')"; [[ "$actual" == %q ]]; mkdir -p %q; tar -xzf %q -C %q; rm -f -- %q' \
+        "$remote_archive" "$digest" "$destination" "$remote_archive" "$destination" "$remote_archive"
+      "$HOST_ENGINE" run "$target" /bin/zsh -c "$extract_script"
+    else
+      require_vm_lease "$target"
+      "$ENGINE" copy-to "$target" "$archive" "$remote_archive"
+      printf -v extract_script 'set -Eeuo pipefail; actual="$(sha256sum %q | awk '\''{print $1}'\'')"; [[ "$actual" == %q ]]; mkdir -p %q; tar -xzf %q -C %q; rm -f -- %q' \
+        "$remote_archive" "$digest" "$destination" "$remote_archive" "$destination" "$remote_archive"
+      "$ENGINE" run "$target" "$extract_script"
+    fi
+  fi
+  printf 'payloadSha256=%s files=%s compressedBytes=%s destination=%s\n' "$digest" "$file_count" "$byte_count" "$destination"
+  rm -f -- "$archive"
 }
 
 golden_paths() {
@@ -808,7 +1037,7 @@ PY
 }
 
 preflight_command() {
-  local suite="${1:?SUITE is required}" profile="${2:?PROFILE is required}" lanes_csv="" baseline_override="" format=--text
+  local suite="${1:?SUITE is required}" profile="${2:?PROFILE is required}" lanes_csv="" baseline_override="" format=--text certification_contract_name
   shift 2
   while (($#)); do
     case "$1" in
@@ -819,10 +1048,11 @@ preflight_command() {
     esac
   done
   case "$suite" in cli|desktop) ;; *) printf 'Unknown suite: %s\n' "$suite" >&2; return 2 ;; esac
+  certification_contract_name="$(certification_contract "$profile")"
   [[ -n "$lanes_csv" ]] || { if [[ "$suite" == cli ]]; then lanes_csv=appimage,deb,rpm,windows; else lanes_csv=appimage,deb,rpm,atomic,windows; fi; }
   local -a lanes=()
   IFS=',' read -r -a lanes <<<"$lanes_csv"
-  local temporary errors=0 requested vm kind baseline status manifest_path
+  local temporary errors=0 requested vm kind baseline status manifest_path certification_path
   temporary="$(mktemp "$RUNTIME_DIR/.preflight.XXXXXX")"
   for requested in "${lanes[@]}"; do
     vm="$(canonical_target "$requested")" || { errors=$((errors + 1)); continue; }
@@ -844,6 +1074,7 @@ preflight_command() {
     fi
     status="$("$ENGINE" status "$vm")"
     manifest_path="$LAB_ROOT/golden/manifests/${vm}-${baseline}.json"
+    certification_path="$LAB_ROOT/golden/manifests/${vm}-${baseline}.certification.json"
     if [[ "$status" != "${vm} stopped "* ]]; then
       printf '%s\t%s\t%s\trunning\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
       errors=$((errors + 1))
@@ -855,6 +1086,12 @@ preflight_command() {
       errors=$((errors + 1))
     elif ! provenance_metadata_valid "$manifest_path" "$vm" "$baseline"; then
       printf '%s\t%s\t%s\tinvalid-provenance\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
+      errors=$((errors + 1))
+    elif [[ ! -f "$certification_path" ]]; then
+      printf '%s\t%s\t%s\tmissing-certification\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$certification_path" >> "$temporary"
+      errors=$((errors + 1))
+    elif ! certification_metadata_valid "$certification_path" "$manifest_path" "$vm" "$baseline" "$certification_contract_name"; then
+      printf '%s\t%s\t%s\tinvalid-certification\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$certification_path" >> "$temporary"
       errors=$((errors + 1))
     else
       printf '%s\t%s\t%s\tready\t%s\n' "$vm" "$(distro_name "$vm")" "$baseline" "$manifest_path" >> "$temporary"
@@ -1340,6 +1577,7 @@ case "$command" in
   artifact-path) artifact_path_command "${2:?OWNER is required}" "${3:?SUITE is required}" "${4:?RUN_ID is required}" ;;
   cache-path) cache_path_command "${2:?OWNER is required}" "${3:?KEY is required}" ;;
   preflight) shift; preflight_command "$@" ;;
+  baselines) shift; baselines_command "$@" ;;
   provenance) shift; provenance_command "$@" ;;
   doctor) doctor_command "${2:---standard}" ;;
   gc) shift; gc_command "$@" ;;
@@ -1376,6 +1614,7 @@ case "$command" in
       "$ENGINE" "$command" "$vm" "${@:3}"
     fi
     ;;
+  stage) shift; stage_command "$@" ;;
   install-atomic)
     require_vm_lease atomic; "$ENGINE" install-atomic
     ;;

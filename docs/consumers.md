@@ -2,8 +2,10 @@
 
 | Consumer | Guests | Baseline | Scope |
 |---|---|---|---|
-| CLI/TUI E2E | Ubuntu, Debian, Fedora, Windows | `release-clean` profile | Real install, guided TUI, lifecycle and runtime proof |
-| Desktop full E2E | Ubuntu, Debian, Fedora, Silverblue, Windows | Explicit `dev-fast` or `release-clean` profile | Packaged launch, setup, hosted app, recovery and lifecycle journeys |
+| CLI/TUI product E2E (default) | Ubuntu, Debian, Fedora, Windows | `product-ready` | Portable contract, noninteractive seed, TUI management, lifecycle and runtime proof |
+| CLI/TUI onboarding E2E | Ubuntu, Debian, Fedora, Windows | `onboarding-clean` | Real prerequisite install, guided TUI, UAC/reboot where applicable |
+| Desktop product E2E (default) | Ubuntu, Debian, Fedora, Silverblue, Windows | `product-ready` | Packaged launch, hosted app, recovery, boundaries and lifecycle journeys |
+| Desktop onboarding E2E | Ubuntu, Debian, Fedora, Silverblue, Windows | `onboarding-clean` | First-run prerequisites plus platform security/reboot flows |
 | Desktop package smoke | Any Linux guest selected independently of package type | Explicit profile | Launch-only AppImage, DEB, RPM, or Flatpak compatibility proof |
 | Published qualification | Selected full lanes plus optional cross-distro smoke | `release-clean` | Published bytes, provenance, native journeys and optional compatibility cells |
 | Native macOS ARM64 | Disposable physical `macos-arm64` host | `ready` plus `runtime-ready` lease cleanup | Direct CLI/app install, native lifecycle, evidence, and scoped rollback |
@@ -19,9 +21,9 @@ not invent storage paths or scan and delete generated roots directly.
 
 Builds, downloads, and version-coupled drivers finish before the lease is
 requested. Their immutable cache keys include source content and pinned build
-environment inputs. The guest phase only copies the prepared input, resets,
-starts, verifies, tests, and restores clean. `lease --cleanup-baseline clean`
-also restores clean after an interrupted consumer.
+environment inputs. The guest phase stages one verified payload bundle,
+resets, starts, verifies, tests, and restores the selected baseline. The
+lease's cleanup baseline does the same after interruption.
 
 Every run uses `lab.sh evidence-init`, `evidence-set`, and `evidence-finish`.
 The required `run.json` fields are schema version, owner, suite, run ID, source
@@ -31,6 +33,10 @@ Canonical matrix entry points are `tests/e2e/matrix.sh` for CLI and
 `desktop/tests/e2e/candidate-matrix.sh` for Desktop. Cross-distribution Desktop
 smoke leases and boots each selected guest once, then runs all selected package
 cells against that boot.
+
+Both matrices accept `--suite product|onboarding|all` and default to `product`.
+Use onboarding after changes to prerequisite discovery, elevation, installers,
+restart/resume, or first-run setup; use `all` for release qualification.
 
 The Mac is dedicated to the lab and disposable at the application layer.
 Consumers acquire its lease with `--cleanup-baseline runtime-ready`, reset it

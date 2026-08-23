@@ -61,15 +61,25 @@ low-space conditions.
 storage policy, and deterministic profiles. `install.sh` copies that contract
 and writes `controller-install.json` with the source commit, dirty state, and
 SHA-256 of every installed controller/provisioning file. Consumers require
-controller capabilities and call `preflight`
-before doing expensive work or acquiring a guest.
+controller capabilities and call the metadata-only `preflight` before doing
+expensive work or acquiring a guest.
 
-`release-clean` resolves VM lanes to `clean` and the physical Mac to `ready`;
-the Mac consumer then requests the stronger `runtime-ready` cleanup contract on
-its lease. `dev-fast` never silently falls back from its declared mapping.
+`onboarding-clean` provides browser-ready, test-ready operating systems without
+adding mutable runtime prerequisites. `product-ready` adds Podman/WSL/runtime
+prerequisites but no OmniDeck candidate or product state. `release-clean` and
+`dev-fast` remain compatibility aliases for those profiles respectively.
+Silverblue keeps its OS-integrated Podman in onboarding coverage, and the
+physical Mac remains a warm, application-disposable host.
 Every accepted clean or named baseline has a SHA-256 fingerprint manifest under
 `golden/manifests/`. The record describes the baseline disk, UEFI state, TPM
 state, and QEMU image metadata; it is not coupled to the mutable controller
 manifest. `doctor` validates the current controller and provisioning contract
 separately, while `doctor --deep` re-hashes accepted clean images when byte-level
 integrity must be re-established.
+
+Baseline certification boots each golden once, runs the browser and runtime
+contracts, and writes a certification tied to the provenance disk digest.
+Routine preflight validates those small records without booting or re-hashing a
+multi-gigabyte image. Candidate payloads use `stage-v1`: one deterministic
+compressed archive, one transport copy, guest-side digest verification, then
+extraction. Shared host mounts are outside the lab contract.

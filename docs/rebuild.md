@@ -21,7 +21,8 @@ Capture the controller-owned manifest immediately after accepting a baseline:
 
 ```sh
 ./lab.sh provenance capture appimage clean
-./lab.sh provenance capture appimage desktop-e2e-v2
+./lab.sh provenance capture appimage onboarding-clean-v1
+./lab.sh provenance capture appimage product-ready-v2
 ./lab.sh doctor --strict
 ```
 
@@ -38,3 +39,9 @@ validate the recorded manifest without paying that hashing cost.
 Build through a dedicated lease, save a new named checkpoint first, boot and
 verify it after a reset, and only then schedule clean-golden replacement. Never
 rewrite a backing image while an active or named overlay depends on it.
+
+Browser availability is a golden-image contract, not a per-run repair. Linux
+goldens must provide Firefox, a discoverable desktop entry, and HTTP/HTTPS MIME
+defaults; Windows must provide Edge; macOS must provide Safari. Run
+`baselines certify` after any image change. A routine product or onboarding run
+then needs only `preflight`, reset, boot/wait, and the normal `verify` probe.
