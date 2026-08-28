@@ -13,7 +13,7 @@ target="$(realpath -e "$target")"
 }
 
 mkdir -p "$target/docs" "$target/runtime/leases" "$target/discarded/runs" "$target/cache" \
-  "$target/cloud-init" "$target/automation/windows" "$target/automation/macos" "$target/hosts"
+  "$target/cloud-init" "$target/automation/windows" "$target/automation/macos" "$target/automation/baselines" "$target/hosts"
 install -m 0755 "$source_dir/lab-engine.sh" "$target/.lab-engine.sh.new"
 install -m 0755 "$source_dir/lab-host.sh" "$target/.lab-host.sh.new"
 install -m 0755 "$source_dir/lab.sh" "$target/.lab.sh.new"
@@ -31,6 +31,9 @@ for user_data in "$source_dir"/cloud-init/*.yaml; do
   install -m 0644 "$user_data" "$target/cloud-init/$(basename "$user_data")"
 done
 install -m 0644 "$source_dir/automation/atomic.ks" "$target/automation/atomic.ks"
+install -m 0755 "$source_dir/automation/configure-firefox-desktop.sh" "$target/automation/configure-firefox-desktop.sh"
+install -m 0755 "$source_dir/automation/baselines/onboarding-clean-linux.sh" "$target/automation/baselines/onboarding-clean-linux.sh"
+install -m 0755 "$source_dir/automation/baselines/product-ready-linux.sh" "$target/automation/baselines/product-ready-linux.sh"
 install -m 0644 "$source_dir/automation/windows/Autounattend.xml" "$target/automation/windows/Autounattend.xml"
 install -m 0644 "$source_dir/automation/windows/provision.ps1" "$target/automation/windows/provision.ps1"
 install -m 0755 "$source_dir/automation/macos/prepare-host.sh" "$target/automation/macos/prepare-host.sh"
@@ -63,7 +66,10 @@ installed = [
     "automation/macos/OmnideckLabDriver.m", "automation/macos/OmnideckLabInput.m",
     "automation/macos/dev.omnideck.lab-awake.plist",
     "hosts/macos-arm64.example.json",
-    "automation/atomic.ks", "automation/windows/Autounattend.xml",
+    "automation/atomic.ks", "automation/configure-firefox-desktop.sh",
+    "automation/baselines/onboarding-clean-linux.sh",
+    "automation/baselines/product-ready-linux.sh",
+    "automation/windows/Autounattend.xml",
     "automation/windows/provision.ps1", "cloud-init/appimage-user-data.yaml",
     "cloud-init/deb-user-data.yaml", "cloud-init/rpm-user-data.yaml",
 ]

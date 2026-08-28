@@ -101,6 +101,7 @@ if /usr/sbin/ioreg -n Root -d1 | grep -Eq '\''"(CGSSessionScreenIsLocked|IOConso
   exit 1
 fi
 command -v node >/dev/null 2>&1 || { printf "Node.js is missing from the configured host PATH.\n" >&2; exit 1; }
+[[ -x /Applications/Safari.app/Contents/MacOS/Safari ]] || { printf "Safari is missing from the configured host.\n" >&2; exit 1; }
 command -v podman >/dev/null 2>&1 || { printf "Podman is missing from the configured host PATH.\n" >&2; exit 1; }
 podman info >/dev/null
 machine="$(podman machine list --format json | jq -r '\''map(select(.Name == "omnideck-runtime" and .Running == true)) | length'\'')"
@@ -117,7 +118,7 @@ downloads_permission_helper="$HOME/.local/libexec/omnideck-lab/allow-downloads.s
 driver="$HOME/Applications/Omnideck Lab Driver.app/Contents/MacOS/omnideck-lab-driver"
 [[ -x "$driver" ]] || { printf "The Accessibility driver is missing; rerun the macOS bootstrap.\n" >&2; exit 1; }
 "$reset_helper" verify runtime-ready >/dev/null
-printf "host=%s/%s memoryBytes=%s node=%s podman=%s machine=omnideck-runtime-ready accessibilityDriver=installed\n" \
+printf "host=%s/%s memoryBytes=%s node=%s podman=%s browser=Safari machine=omnideck-runtime-ready accessibilityDriver=installed\n" \
   "$os" "$arch" "$(sysctl -n hw.memsize)" "$(node --version)" "$(podman --version)"
 '
 }

@@ -44,8 +44,9 @@ trap cleanup EXIT
 "$driver" wait "$target_executable" 10 >/dev/null
 # Screen Recording is granted to the app bundle. Launch Services must start the
 # helper for this check; invoking its Mach-O directly through ssh has the ssh
-# process's capture context and returns a false negative on macOS 15.
-/usr/bin/open -n -a "$application" --args screenshot "$target_executable" "$temporary"
+# process's capture context and returns a false negative on macOS 15. Wait for
+# the helper to exit so every window capture is closed before cleanup begins.
+/usr/bin/open -W -n -a "$application" --args screenshot "$target_executable" "$temporary"
 capture=''
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   capture="$(find "$temporary" -maxdepth 1 -type f -name 'window-*.png' -size +0c -print -quit)"

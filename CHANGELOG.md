@@ -1,5 +1,20 @@
 # OmniDeck Release Lab Changelog
 
+## 2026-08-23
+
+- Added controller 2.4's explicit product/onboarding profiles, scripted golden
+  builders and certification, browser-ready image contract, and deterministic
+  single-bundle candidate staging.
+- Normalized the fixed disposable Linux tester password in every generated
+  baseline and made certification verify its exact hash. This prevents older
+  source checkpoints from producing goldens that pass metadata checks but
+  reject deterministic PolicyKit automation.
+- Versioned the stronger certification contract so metadata preflight rejects
+  certificates created before credential and live-runtime verification.
+- Made the native macOS permission probe wait for its app-bundle screenshot
+  helper to finish, preventing successful checks from racing temporary capture
+  cleanup and being reported as false permission failures.
+
 ## 2026-08-13
 
 - Hardened controller 2.3.1's native Mac automation: bootstrap is lease-

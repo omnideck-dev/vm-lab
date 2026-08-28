@@ -14,7 +14,8 @@ case "$1" in
       windows) echo 'windows stopped ssh=2225 spice=5935' ;;
     esac
     ;;
-  snapshots) printf 'appimage snapshots:\nclean\ndesktop-e2e-v2\npodman-ready\n' ;;
+  snapshots) printf 'appimage snapshots:\nclean\nonboarding-clean-v1\nproduct-ready-v2\npodman-ready\n' ;;
   stop|reset) printf '%s\n' "$*" >> "$fake_root/runtime/fake-actions.log" ;;
+  copy-to|run) printf '%s\n' "$*" >> "$fake_root/runtime/fake-actions.log" ;;
   *) printf 'engine %s\n' "$*" ;;
 esac

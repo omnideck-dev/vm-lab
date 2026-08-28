@@ -21,18 +21,18 @@ chmod +x "$test_root/lab-host.sh"
 cp "$source_dir/hosts/macos-arm64.example.json" "$test_root/hosts/macos-arm64.json"
 
 "$test_root/lab.sh" describe ubuntu --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["vm"] == "appimage"'
-"$test_root/lab.sh" baseline ubuntu desktop | grep -Fxq desktop-e2e-v2
-"$test_root/lab.sh" profile release-clean ubuntu | grep -Fxq clean
+"$test_root/lab.sh" baseline ubuntu desktop | grep -Fxq product-ready-v2
+"$test_root/lab.sh" profile release-clean ubuntu | grep -Fxq onboarding-clean-v1
 "$test_root/lab.sh" describe macos --json | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["kind"] == "host" and data["architecture"] == "arm64"'
-"$test_root/lab.sh" profile release-clean macos | grep -Fxq ready
+"$test_root/lab.sh" profile onboarding-clean macos | grep -Fxq ready
 touch "$test_root/runtime/fake-host-locked"
 "$test_root/lab.sh" status macos --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["state"] == "locked"'
 rm "$test_root/runtime/fake-host-locked"
-"$test_root/lab.sh" capabilities --json | python3 -c 'import json,sys; assert "artifact-path" in json.load(sys.stdin)["features"]'
+"$test_root/lab.sh" capabilities --json | python3 -c 'import json,sys; features=json.load(sys.stdin)["features"]; assert "artifact-path" in features and "stage-v1" in features and "golden-browser-contract" in features'
 "$test_root/lab.sh" artifact-path cli e2e test-run | grep -Fxq "$test_root/artifacts/cli/e2e/test-run"
 "$test_root/lab.sh" cache-path cli builder-test | grep -Fxq "$test_root/cache/cli/builder-test"
 mkdir -p "$test_root/golden/manifests"
-python3 - "$test_root/lab-manifest.json" "$test_root/golden/manifests/appimage-desktop-e2e-v2.json" <<'PY'
+python3 - "$test_root/lab-manifest.json" "$test_root/golden/manifests/appimage-product-ready-v2.json" <<'PY'
 import hashlib, json, sys
 with open(sys.argv[1], "rb") as handle:
     config_sha = hashlib.sha256(handle.read()).hexdigest()
@@ -45,14 +45,26 @@ record = {
         "tpmTreeSha256": "none",
         "qemuImage": {},
 }
-for path, baseline in ((sys.argv[2], "desktop-e2e-v2"), (sys.argv[2].replace("desktop-e2e-v2", "clean"), "clean")):
+for path, baseline, contract in (
+    (sys.argv[2], "product-ready-v2", "product-ready"),
+    (sys.argv[2].replace("product-ready-v2", "onboarding-clean-v1"), "onboarding-clean-v1", "onboarding-clean"),
+):
     record["baseline"] = baseline
     with open(path, "w") as handle:
         json.dump(record, handle)
+    with open(path.replace(".json", ".certification.json"), "w") as handle:
+        json.dump({
+            "schemaVersion": 2,
+            "contractRevision": 2,
+            "vm": "appimage",
+            "baseline": baseline,
+            "contract": contract,
+            "provenanceDiskSha256": record["diskSha256"],
+        }, handle)
 PY
-"$test_root/lab.sh" preflight desktop dev-fast --lanes appimage --json |
+"$test_root/lab.sh" preflight desktop product-ready --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
-"$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
+"$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 python3 - "$test_root/lab-manifest.json" <<'PY'
 import json, sys
@@ -64,7 +76,7 @@ with open(path, "w") as handle:
     json.dump(manifest, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
-"$test_root/lab.sh" preflight desktop dev-fast --lanes appimage --json |
+"$test_root/lab.sh" preflight desktop product-ready --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 python3 - "$test_root/lab-manifest.json" <<'PY'
 import json, sys
@@ -76,9 +88,9 @@ with open(path, "w") as handle:
     json.dump(manifest, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
-"$test_root/lab.sh" preflight cli release-clean --lanes appimage --json |
+"$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
-python3 - "$test_root/golden/manifests/appimage-clean.json" <<'PY'
+python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v1.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 with open(path) as handle:
@@ -87,12 +99,12 @@ record["diskSha256"] = "not-a-digest"
 with open(path, "w") as handle:
     json.dump(record, handle)
 PY
-if malformed_fingerprint_result="$("$test_root/lab.sh" preflight cli release-clean --lanes appimage --json)"; then
+if malformed_fingerprint_result="$("$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json)"; then
   printf 'Malformed baseline fingerprint unexpectedly passed preflight\n' >&2
   exit 1
 fi
 python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is False' <<<"$malformed_fingerprint_result"
-"$test_root/lab.sh" preflight cli release-clean --lanes macos-arm64 --json |
+"$test_root/lab.sh" preflight cli onboarding-clean --lanes macos-arm64 --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 if "$test_root/lab.sh" start ubuntu >/dev/null 2>&1; then
   printf 'unleased mutation unexpectedly succeeded\n' >&2
@@ -100,9 +112,17 @@ if "$test_root/lab.sh" start ubuntu >/dev/null 2>&1; then
 fi
 "$test_root/lab.sh" lease ubuntu test successful -- bash -c 'test "$OMNIDECK_VM_LAB_VM" = appimage'
 [[ ! -e "$test_root/discarded/runs/successful-appimage" ]]
+"$test_root/lab.sh" lease ubuntu test no-lock-leak -- bash -c 'test ! -e /proc/$$/fd/9'
 "$test_root/lab.sh" lease ubuntu test successful-cleanup --cleanup-baseline clean -- true
 grep -Fxq 'reset appimage clean' "$test_root/runtime/fake-actions.log"
 [[ ! -e "$test_root/discarded/runs/successful-cleanup-appimage" ]]
+stage_source="$test_root/stage-source"
+mkdir -p "$stage_source/nested"
+printf 'payload\n' > "$stage_source/nested/file.txt"
+first_stage="$("$test_root/lab.sh" lease ubuntu test stage-one -- "$test_root/lab.sh" stage ubuntu "$stage_source" /tmp/omnideck-stage-test)"
+second_stage="$("$test_root/lab.sh" lease ubuntu test stage-two -- "$test_root/lab.sh" stage ubuntu "$stage_source" /tmp/omnideck-stage-test)"
+[[ "$first_stage" == "$second_stage" ]]
+grep -Fq 'copy-to appimage' "$test_root/runtime/fake-actions.log"
 "$test_root/lab.sh" lease macos test host-successful -- "$test_root/lab.sh" run macos true
 [[ ! -e "$test_root/discarded/runs/host-successful-macos-arm64" ]]
 if "$test_root/lab.sh" lease macos test host-cleanup-failed --cleanup-baseline runtime-ready -- bash -c 'exit 7'; then
@@ -220,6 +240,11 @@ install_root="$(mktemp -d)"
 mkdir -p "$install_root"/{base-images,disks,golden}
 "$source_dir/install.sh" "$install_root" >/dev/null
 [[ -x "$install_root/automation/macos/bootstrap-host.sh" ]]
+[[ -x "$install_root/automation/baselines/onboarding-clean-linux.sh" ]]
+[[ -x "$install_root/automation/baselines/product-ready-linux.sh" ]]
+grep -Fq "usermod --password '\$6\$SRTdHbBlz5uKrH7M\$" "$install_root/automation/baselines/onboarding-clean-linux.sh"
+grep -Fq "usermod --password '\$6\$SRTdHbBlz5uKrH7M\$" "$install_root/automation/baselines/product-ready-linux.sh"
+grep -Fq 'actual_password_hash=' "$install_root/lab.sh"
 [[ -x "$install_root/automation/macos/prepare-host.sh" ]]
 [[ -x "$install_root/automation/macos/run-suite.sh" ]]
 [[ -x "$install_root/automation/macos/reset-host.sh" ]]
@@ -246,6 +271,8 @@ assert "automation/macos/install-input-extension.sh" in record["installedFilesSh
 assert "automation/macos/OmnideckLabDriver.m" in record["installedFilesSha256"]
 assert "automation/macos/OmnideckLabInput.m" in record["installedFilesSha256"]
 assert "automation/macos/dev.omnideck.lab-awake.plist" in record["installedFilesSha256"]
+assert "automation/baselines/onboarding-clean-linux.sh" in record["installedFilesSha256"]
+assert "automation/baselines/product-ready-linux.sh" in record["installedFilesSha256"]
 PY
 rm -rf -- "$install_root"
 printf 'lab controller tests passed\n'

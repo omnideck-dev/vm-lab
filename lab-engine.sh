@@ -530,19 +530,40 @@ verify_one() {
     ssh_run powershell.exe -NoProfile -NonInteractive -Command - <<'POWERSHELL'
 $os = Get-CimInstance Win32_OperatingSystem
 $podman = Get-Command podman -ErrorAction SilentlyContinue
+$browser = Get-Item 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' -ErrorAction SilentlyContinue
 $tpm = Get-Tpm
+if (-not $browser) { throw 'The golden image browser is missing.' }
 Write-Output ("os=" + $os.Caption + " " + $os.Version)
 Write-Output ("display_version=" + (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion').DisplayVersion)
 Write-Output ("secure_boot=" + (Confirm-SecureBootUEFI))
 Write-Output ("tpm_present=" + $tpm.TpmPresent)
 Write-Output ("tpm_ready=" + $tpm.TpmReady)
 Write-Output ("podman=" + $(if ($podman) { $podman.Source } else { 'absent' }))
+Write-Output ("browser=" + $browser.FullName)
 Write-Output ("sshd=" + (Get-Service sshd).Status)
 Write-Output ("ready_marker=" + (Test-Path 'C:\omnideck-lab-ready'))
 POWERSHELL
     return
   fi
-  ssh_run 'set -e; . /etc/os-release; printf "os=%s %s\n" "$NAME" "$VERSION_ID"; printf "desktop_target="; systemctl get-default; printf "display_manager="; systemctl is-enabled display-manager 2>/dev/null || true; printf "podman="; if command -v podman >/dev/null; then command -v podman; else echo absent; fi; printf "ready_marker="; test -f /var/lib/omnideck-lab-ready && echo yes || echo no; printf "cloud_init="; cloud-init status 2>/dev/null || echo n/a'
+  ssh_run 'set -e
+    . /etc/os-release
+    browser_bin="$(command -v firefox || command -v firefox-esr || true)"
+    browser_entry=/var/lib/snapd/desktop/applications/firefox_firefox.desktop
+    [[ -n "$browser_bin" && -x "$browser_bin" ]]
+    [[ -f "$browser_entry" ]]
+    grep -Fq x-scheme-handler/http "$browser_entry"
+    grep -Fq x-scheme-handler/https "$browser_entry"
+    command -v xdg-mime >/dev/null
+    grep -Fq "x-scheme-handler/http=firefox_firefox.desktop" /home/tester/.config/mimeapps.list
+    grep -Fq "x-scheme-handler/https=firefox_firefox.desktop" /home/tester/.config/mimeapps.list
+    printf "os=%s %s\n" "$NAME" "$VERSION_ID"
+    printf "desktop_target="; systemctl get-default
+    printf "display_manager="; systemctl is-enabled display-manager 2>/dev/null || true
+    printf "podman="; if command -v podman >/dev/null; then command -v podman; else echo absent; fi
+    printf "browser=%s\n" "$browser_bin"
+    printf "browser_entry=%s\n" "$browser_entry"
+    printf "ready_marker="; test -f /var/lib/omnideck-lab-ready && echo yes || echo no
+    printf "cloud_init="; cloud-init status 2>/dev/null || echo n/a'
 }
 
 stop_one() {

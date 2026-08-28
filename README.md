@@ -25,7 +25,7 @@ cp hosts/macos-arm64.example.json hosts/macos-arm64.json
 ./automation/macos/run-suite.sh \
   --cli-repo /path/to/omnideck-cli \
   --desktop-repo /path/to/omnideck
-./lab.sh preflight desktop release-clean --lanes macos-arm64
+./lab.sh preflight desktop product-ready --lanes macos-arm64
 ./lab.sh lease macos-arm64 manual --cleanup-baseline runtime-ready -- bash
 ./lab.sh reset macos-arm64 runtime-ready
 ./lab.sh verify macos-arm64
@@ -53,19 +53,20 @@ DMGs are ad-hoc signed and can receive a new CDHash each build, so native tests
 use that helper around their first download instead of relying on stale TCC
 state from an earlier candidate.
 
-Run the strict preflight before using a lane. Every command that can touch a guest
-must execute under one lab-owned lease:
+Routine test runs use a cheap metadata preflight before touching a lane. Deep
+image hashing and browser/runtime certification happen only when goldens are
+built or changed. Every command that can touch a guest must execute under one
+lab-owned lease:
 
 ```sh
 cd "$OMNIDECK_VM_LAB_DIR"
-./lab.sh doctor --strict
-./lab.sh preflight cli release-clean --lanes appimage,deb,rpm,windows
-./lab.sh lease ubuntu manual --cleanup-baseline clean -- bash
+./lab.sh preflight cli product-ready --lanes appimage,deb,rpm,windows
+./lab.sh lease ubuntu manual --cleanup-baseline product-ready-v2 -- bash
 ./lab.sh start ubuntu
 ./lab.sh wait ubuntu
 ./lab.sh verify ubuntu
 ./lab.sh viewer ubuntu
-# Exit after the test; the lease restores the clean baseline even on interruption.
+# Exit after the test; the lease restores the selected baseline even on interruption.
 exit
 ```
 
@@ -102,10 +103,27 @@ Useful read-only commands:
 ./lab.sh describe ubuntu --shell
 ./lab.sh snapshots
 ./lab.sh doctor --strict
-./lab.sh preflight desktop dev-fast --lanes appimage,deb,rpm,atomic,windows
+./lab.sh preflight desktop product-ready --lanes appimage,deb,rpm,atomic,windows
 ./lab.sh runs list
 ./lab.sh cleanup --dry-run
 ```
+
+Build and certify golden profiles only when their recipes or prerequisites
+change. `onboarding-clean` contains the browser and lab tooling but no added
+Podman on mutable Linux/Windows lanes. `product-ready` adds warm runtime
+prerequisites without baking an OmniDeck candidate into the image:
+
+```sh
+./lab.sh baselines build onboarding-clean --lanes appimage,deb,rpm,atomic
+./lab.sh baselines certify onboarding-clean --lanes appimage,deb,rpm,atomic,windows
+./lab.sh baselines build product-ready --lanes appimage,deb,rpm,atomic,windows
+./lab.sh baselines certify product-ready --lanes appimage,deb,rpm,atomic,windows,macos-arm64
+```
+
+Candidates and drivers are transferred at run time with one compressed,
+SHA-256-verified bundle: `lab.sh stage TARGET DIR DEST`. Host filesystem mounts
+are deliberately not part of the contract because they weaken guest isolation
+and differ across QEMU, Windows, and the physical Mac.
 
 The canonical guest names are `ubuntu`, `debian`, `fedora`, `silverblue`, and
 `windows`. Historical aliases `appimage`, `deb`, `rpm`, and `atomic` remain

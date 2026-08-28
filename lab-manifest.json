@@ -11,20 +11,36 @@
     }
   },
   "profiles": {
-    "dev-fast": {
-      "appimage": "desktop-e2e-v2",
-      "atomic": "clean",
-      "deb": "clean",
+    "product-ready": {
+      "appimage": "product-ready-v2",
+      "atomic": "product-ready-v2",
+      "deb": "product-ready-v2",
       "macos-arm64": "ready",
-      "rpm": "desktop-e2e-v2",
+      "rpm": "product-ready-v2",
+      "windows": "podman-ready"
+    },
+    "onboarding-clean": {
+      "appimage": "onboarding-clean-v1",
+      "atomic": "onboarding-clean-v1",
+      "deb": "onboarding-clean-v1",
+      "macos-arm64": "ready",
+      "rpm": "onboarding-clean-v1",
+      "windows": "clean"
+    },
+    "dev-fast": {
+      "appimage": "product-ready-v2",
+      "atomic": "product-ready-v2",
+      "deb": "product-ready-v2",
+      "macos-arm64": "ready",
+      "rpm": "product-ready-v2",
       "windows": "podman-ready"
     },
     "release-clean": {
-      "appimage": "clean",
-      "atomic": "clean",
-      "deb": "clean",
+      "appimage": "onboarding-clean-v1",
+      "atomic": "onboarding-clean-v1",
+      "deb": "onboarding-clean-v1",
       "macos-arm64": "ready",
-      "rpm": "clean",
+      "rpm": "onboarding-clean-v1",
       "windows": "clean"
     }
   },
@@ -49,7 +65,7 @@
       "distro": "ubuntu",
       "memoryMiB": 6144,
       "provisioning": "cloud-init/appimage-user-data.yaml",
-      "provisioningSha256": "fffaf2af8d48b0688758bdead3376c5299299482219eb326ee8e8fb34eb6906e",
+      "provisioningSha256": "2369477c42f028865eab60112603bafa54b436b4e3bd1f446654d51f1eba1565",
       "spicePort": 5931,
       "sshPort": 2221
     },
@@ -63,7 +79,7 @@
       "distro": "debian",
       "memoryMiB": 6144,
       "provisioning": "cloud-init/deb-user-data.yaml",
-      "provisioningSha256": "e6ece57161544c34d71a95ad91645546c73f233e8d0e300277fe3dee324cfa44",
+      "provisioningSha256": "4116e6e8f8783383350f5ecd92e4876240a1f04db4536ff2fabc6e1172a41bc5",
       "spicePort": 5932,
       "sshPort": 2222
     },
@@ -77,7 +93,7 @@
       "distro": "fedora",
       "memoryMiB": 6144,
       "provisioning": "cloud-init/rpm-user-data.yaml",
-      "provisioningSha256": "e20014b99b79c6fff203b287fffa55832bc4cbfd43abab441afab68b26f87a67",
+      "provisioningSha256": "76acbead17329cd8a4266cec66aa9ae6aba45bba3d2f7883ddb21d1a947e9a9a",
       "spicePort": 5933,
       "sshPort": 2223
     },
@@ -91,7 +107,7 @@
       "distro": "silverblue",
       "memoryMiB": 8192,
       "provisioning": "automation/atomic.ks",
-      "provisioningSha256": "b01bd4c7fb05207bf4fc794e9159c690468bffd7d2be910377fec8425700bd51",
+      "provisioningSha256": "1d7e9e79519f3707fabcff27685709d9899ec09758b671a360d74ca3483efe51",
       "spicePort": 5934,
       "sshPort": 2224
     },
