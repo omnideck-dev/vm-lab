@@ -65,3 +65,30 @@ disk, UEFI, or TPM state changes. Controller, profile, and provisioning-source
 changes do not rewrite or invalidate an unchanged checkpoint record. Validate
 those current inputs with `lab.sh doctor --strict`, then run the exact
 consumer/profile `lab.sh preflight`.
+
+Special-purpose compatibility checkpoints can be certified without changing
+the shared profile mappings. The override must select exactly one explicit lane
+and runs the same certification checks and cleanup as the standard profile:
+
+```sh
+./lab.sh baselines certify product-ready --lanes windows --baseline CHECKPOINT
+./lab.sh preflight desktop product-ready --lanes windows --baseline CHECKPOINT
+```
+
+A Windows checkpoint with an earlier official WSL release is compatibility
+coverage only. Record the exact WSL installer digest, verified Microsoft
+signature, installed WSL version, Podman version, and rootless memory-limit
+proof. Preserve the latest-WSL failure evidence and normal profiles. A baseline
+with WSL already installed does not prove clean-OS WSL installation or reboot
+onboarding, and must not be labeled as that coverage. Do not put desktop
+candidates or per-run diagnostic tools into reusable checkpoints.
+
+The local Windows compatibility checkpoint `podman-wsl-2.7.14-v1` is derived
+from `onboarding-clean-no-expiry-v1`. It uses the official x64 WSL 2.7.14 MSI
+(`db084e536279a59e90a26ec598d8aa8a4dff8309f41d078fd06242953ac1ebcd`),
+validated with Windows Authenticode as Microsoft-signed, and the published
+CLI beta.6's official Podman 6.0.2 setup. Its compatibility scope is product
+testing with WSL and Podman preinstalled, not current-WSL onboarding. Rootless
+systemd containers were checked for `memory.max=2147483648` before and after a
+machine restart using the exact app 0.2.2 image. No custom Podman binary,
+rootful fallback, or disabled memory limit is part of this checkpoint.

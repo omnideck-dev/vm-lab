@@ -36,7 +36,7 @@ Ownership and lifecycle:
   artifact-path OWNER SUITE RUN_ID
   cache-path OWNER KEY
   preflight SUITE PROFILE [--lanes CSV] [--json]
-  baselines build|certify PROFILE [--lanes CSV]
+  baselines build|certify PROFILE [--lanes CSV] [--baseline NAME (certify only)]
 
 Guest commands (must run inside `lease`):
   init [VM]              Initialize one or all guests
@@ -795,8 +795,8 @@ build_baseline_one() {
 }
 
 certify_baseline_one() {
-  local vm="$1" profile="$2" baseline contract run_id kind password_hash
-  baseline="$(profile_command "$profile" "$vm")"
+  local vm="$1" profile="$2" baseline="${3:-}" contract run_id kind password_hash
+  [[ -n "$baseline" ]] || baseline="$(profile_command "$profile" "$vm")"
   contract="$(certification_contract "$profile")"
   kind="$(target_kind "$vm")"
   password_hash="$(disposable_linux_password_hash)"
@@ -851,15 +851,20 @@ certify_baseline_one() {
 }
 
 baselines_command() {
-  local action="${1:?ACTION is required}" profile="${2:?PROFILE is required}" lanes_csv="" requested vm
+  local action="${1:?ACTION is required}" profile="${2:?PROFILE is required}" lanes_csv="" baseline_override="" requested vm
   shift 2
   while (($#)); do
     case "$1" in
       --lanes) lanes_csv="${2:?value required}"; shift 2 ;;
+      --baseline) baseline_override="${2:?value required}"; validate_identifier baseline "$baseline_override"; shift 2 ;;
       *) printf 'Unknown baselines argument: %s\n' "$1" >&2; return 2 ;;
     esac
   done
   case "$profile" in onboarding-clean|product-ready) ;; *) printf 'Unknown build profile: %s\n' "$profile" >&2; return 2 ;; esac
+  if [[ -n "$baseline_override" && ( "$action" != certify || -z "$lanes_csv" || "$lanes_csv" == *,* ) ]]; then
+    printf 'A baseline override requires certify and exactly one explicit lane.\n' >&2
+    return 2
+  fi
   [[ -n "$lanes_csv" ]] || lanes_csv=appimage,deb,rpm,atomic,windows,macos-arm64
   local -a lanes=()
   IFS=, read -r -a lanes <<<"$lanes_csv"
@@ -880,7 +885,7 @@ baselines_command() {
           build_baseline_one "$vm" "$profile"
         fi
         ;;
-      certify) certify_baseline_one "$vm" "$profile" ;;
+      certify) certify_baseline_one "$vm" "$profile" "$baseline_override" ;;
       *) printf 'Unknown baselines action: %s\n' "$action" >&2; return 2 ;;
     esac
   done

@@ -80,6 +80,35 @@ PY
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 "$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
+python3 - "$test_root/golden/manifests/windows-wsl-compat-test.json" <<'PY'
+import json, sys
+with open(sys.argv[1], 'w') as handle:
+    json.dump({'schemaVersion': 1, 'vm': 'windows', 'baseline': 'wsl-compat-test',
+               'diskSha256': 'c' * 64, 'uefiVarsSha256': 'd' * 64,
+               'tpmTreeSha256': 'none', 'qemuImage': {}}, handle)
+PY
+"$test_root/lab.sh" baselines certify product-ready --lanes windows --baseline wsl-compat-test
+grep -Fxq 'reset windows wsl-compat-test' "$test_root/runtime/fake-actions.log"
+grep -Fq 'Podman machine failed to start' "$test_root/runtime/fake-actions.log"
+python3 - "$test_root/golden/manifests/windows-wsl-compat-test.certification.json" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    record = json.load(handle)
+assert record['baseline'] == 'wsl-compat-test'
+assert record['contract'] == 'product-ready'
+assert record['provenanceDiskSha256'] == 'c' * 64
+PY
+"$test_root/lab.sh" profile product-ready windows | grep -Fxq podman-ready-no-expiry-v1
+for args in \
+  'build product-ready --lanes windows --baseline wsl-compat-test' \
+  'certify product-ready --baseline wsl-compat-test' \
+  'certify product-ready --lanes windows,appimage --baseline wsl-compat-test' \
+  'certify product-ready --lanes windows --baseline ../unsafe'; do
+  if "$test_root/lab.sh" baselines $args >/dev/null 2>&1; then
+    printf 'Invalid certification override unexpectedly succeeded: %s\n' "$args" >&2
+    exit 1
+  fi
+done
 python3 - "$test_root/lab-manifest.json" <<'PY'
 import json, sys
 path = sys.argv[1]
