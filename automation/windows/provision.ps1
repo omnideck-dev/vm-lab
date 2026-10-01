@@ -6,6 +6,9 @@ New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 Start-Transcript -Path "$logDirectory\provision.log" -Append
 
 try {
+    # This disposable fixture account must still permit console sign-in when
+    # an immutable checkpoint is restored months after it was provisioned.
+    Set-LocalUser -Name 'tester' -PasswordNeverExpires $true
     powercfg.exe /change standby-timeout-ac 0 | Out-Null
     powercfg.exe /change monitor-timeout-ac 0 | Out-Null
 
