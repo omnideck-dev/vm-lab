@@ -25,7 +25,7 @@
       "deb": "onboarding-clean-v1",
       "macos-arm64": "ready",
       "rpm": "onboarding-clean-v1",
-      "windows": "clean"
+      "windows": "onboarding-clean-no-expiry-v1"
     },
     "dev-fast": {
       "appimage": "product-ready-v2",
@@ -41,7 +41,7 @@
       "deb": "onboarding-clean-v1",
       "macos-arm64": "ready",
       "rpm": "onboarding-clean-v1",
-      "windows": "clean"
+      "windows": "onboarding-clean-no-expiry-v1"
     }
   },
   "hosts": {

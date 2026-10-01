@@ -1,9 +1,12 @@
 # Checkpoints
 
-Windows product profiles use `podman-ready-no-expiry-v1`. It differs from the
-older `podman-ready` checkpoint only by disabling password expiry for the
-disposable `tester` account. Provisioning applies this policy to new guests,
-and live verification rejects expiring test accounts before product tests.
+Windows product profiles use `podman-ready-no-expiry-v1`; onboarding and release
+profiles use `onboarding-clean-no-expiry-v1`. These derive from `podman-ready`
+and `clean`, respectively, with password expiry disabled only for the disposable
+`tester` account. The onboarding checkpoint still has no Podman installation,
+so it exercises prerequisite installation and reboot rather than the product-ready
+shortcut. Provisioning applies this account policy to new guests, and live
+verification rejects expiring test accounts before any consumer tests.
 To refresh an existing Windows checkpoint, use a maintenance lease, run
 `Set-LocalUser -Name tester -PasswordNeverExpires $true` in the guest, verify
 console sign-in, stop the guest, and save a new named checkpoint. Capture its

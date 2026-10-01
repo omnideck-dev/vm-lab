@@ -25,6 +25,8 @@ cp "$source_dir/hosts/macos-arm64.example.json" "$test_root/hosts/macos-arm64.js
 "$test_root/lab.sh" profile release-clean ubuntu | grep -Fxq onboarding-clean-v1
 "$test_root/lab.sh" profile product-ready windows | grep -Fxq podman-ready-no-expiry-v1
 "$test_root/lab.sh" profile dev-fast windows | grep -Fxq podman-ready-no-expiry-v1
+"$test_root/lab.sh" profile onboarding-clean windows | grep -Fxq onboarding-clean-no-expiry-v1
+"$test_root/lab.sh" profile release-clean windows | grep -Fxq onboarding-clean-no-expiry-v1
 grep -Fq "Set-LocalUser -Name 'tester' -PasswordNeverExpires \$true" "$source_dir/automation/windows/provision.ps1"
 grep -Fq "if (-not \$tester -or \$tester.PasswordExpires) { Write-Error 'The disposable tester account is missing or its password expires; refresh the Windows checkpoint before testing.'; exit 1 }" "$source_dir/lab-engine.sh"
 grep -Fq 'explorer_check="if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { exit 1 }"' "$source_dir/lab.sh"
