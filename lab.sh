@@ -814,6 +814,21 @@ certify_baseline_one() {
       "$lab" start "$vm"
       "$lab" wait "$vm"
       "$lab" verify "$vm"
+      if [[ "$vm" == windows ]]; then
+        # WSL user-mode networking belongs to the interactive test user.
+        # SSH readiness alone does not establish the required desktop session.
+        explorer_check="if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { exit 1 }"
+        if ! "$lab" run "$vm" powershell.exe -NoProfile -NonInteractive -Command "$explorer_check"; then
+          "$lab" send-keys "$vm" tab ret
+          sleep 1
+          "$lab" send-keys "$vm" o m n i d e c k minus t e s t ret
+          for attempt in $(seq 1 30); do
+            "$lab" run "$vm" powershell.exe -NoProfile -NonInteractive -Command "$explorer_check" && break
+            sleep 1
+          done
+          "$lab" run "$vm" powershell.exe -NoProfile -NonInteractive -Command "$explorer_check"
+        fi
+      fi
       if [[ "$vm" != windows ]]; then
         actual_password_hash="$("$lab" run "$vm" "sudo getent shadow tester | cut -d: -f2")"
         [[ "$actual_password_hash" == "$password_hash" ]]

@@ -23,6 +23,18 @@ cp "$source_dir/hosts/macos-arm64.example.json" "$test_root/hosts/macos-arm64.js
 "$test_root/lab.sh" describe ubuntu --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["vm"] == "appimage"'
 "$test_root/lab.sh" baseline ubuntu desktop | grep -Fxq product-ready-v2
 "$test_root/lab.sh" profile release-clean ubuntu | grep -Fxq onboarding-clean-v1
+"$test_root/lab.sh" profile product-ready windows | grep -Fxq podman-ready-no-expiry-v1
+"$test_root/lab.sh" profile dev-fast windows | grep -Fxq podman-ready-no-expiry-v1
+grep -Fq "Set-LocalUser -Name 'tester' -PasswordNeverExpires \$true" "$source_dir/automation/windows/provision.ps1"
+grep -Fq "if (-not \$tester -or \$tester.PasswordExpires) { Write-Error 'The disposable tester account is missing or its password expires; refresh the Windows checkpoint before testing.'; exit 1 }" "$source_dir/lab-engine.sh"
+grep -Fq 'explorer_check="if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { exit 1 }"' "$source_dir/lab.sh"
+grep -Fq '"$lab" send-keys "$vm" o m n i d e c k minus t e s t ret' "$source_dir/lab.sh"
+python3 - "$source_dir" <<'PY'
+import hashlib, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+spec = json.loads((root / 'lab-manifest.json').read_text())['vms']['windows']
+assert hashlib.sha256((root / spec['provisioning']).read_bytes()).hexdigest() == spec['provisioningSha256']
+PY
 "$test_root/lab.sh" describe macos --json | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["kind"] == "host" and data["architecture"] == "arm64"'
 "$test_root/lab.sh" profile onboarding-clean macos | grep -Fxq ready
 touch "$test_root/runtime/fake-host-locked"

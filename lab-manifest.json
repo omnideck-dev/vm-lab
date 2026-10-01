@@ -17,7 +17,7 @@
       "deb": "product-ready-v2",
       "macos-arm64": "ready",
       "rpm": "product-ready-v2",
-      "windows": "podman-ready"
+      "windows": "podman-ready-no-expiry-v1"
     },
     "onboarding-clean": {
       "appimage": "onboarding-clean-v1",
@@ -33,7 +33,7 @@
       "deb": "product-ready-v2",
       "macos-arm64": "ready",
       "rpm": "product-ready-v2",
-      "windows": "podman-ready"
+      "windows": "podman-ready-no-expiry-v1"
     },
     "release-clean": {
       "appimage": "onboarding-clean-v1",
@@ -121,7 +121,7 @@
       "distro": "windows",
       "memoryMiB": 8192,
       "provisioning": "automation/windows/provision.ps1",
-      "provisioningSha256": "72961855738c056813968c145fa2508c714a71bf6e16d6c327e9b79e80956dc1",
+      "provisioningSha256": "3f4afed23e3a198325a2533c42d11a388afbd40368e54ff296e8840f87a956f2",
       "spicePort": 5935,
       "sshPort": 2225,
       "unattend": "automation/windows/Autounattend.xml",

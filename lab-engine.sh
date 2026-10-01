@@ -529,6 +529,8 @@ verify_one() {
   if [[ "$WINDOWS_GUEST" == true ]]; then
     ssh_run powershell.exe -NoProfile -NonInteractive -Command - <<'POWERSHELL'
 $os = Get-CimInstance Win32_OperatingSystem
+$tester = Get-LocalUser -Name 'tester' -ErrorAction Stop
+if (-not $tester -or $tester.PasswordExpires) { Write-Error 'The disposable tester account is missing or its password expires; refresh the Windows checkpoint before testing.'; exit 1 }
 $podman = Get-Command podman -ErrorAction SilentlyContinue
 $browser = Get-Item 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' -ErrorAction SilentlyContinue
 $tpm = Get-Tpm
