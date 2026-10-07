@@ -32,6 +32,7 @@ for user_data in "$source_dir"/cloud-init/*.yaml; do
 done
 install -m 0644 "$source_dir/automation/atomic.ks" "$target/automation/atomic.ks"
 install -m 0755 "$source_dir/automation/configure-firefox-desktop.sh" "$target/automation/configure-firefox-desktop.sh"
+install -m 0755 "$source_dir/automation/baselines/linux-app-state.py" "$target/automation/baselines/linux-app-state.py"
 install -m 0755 "$source_dir/automation/baselines/onboarding-clean-linux.sh" "$target/automation/baselines/onboarding-clean-linux.sh"
 install -m 0755 "$source_dir/automation/baselines/product-ready-linux.sh" "$target/automation/baselines/product-ready-linux.sh"
 install -m 0644 "$source_dir/automation/windows/Autounattend.xml" "$target/automation/windows/Autounattend.xml"
@@ -48,9 +49,28 @@ install -m 0644 "$source_dir/automation/macos/OmnideckLabDriver.m" "$target/auto
 install -m 0644 "$source_dir/automation/macos/OmnideckLabInput.m" "$target/automation/macos/OmnideckLabInput.m"
 install -m 0644 "$source_dir/automation/macos/dev.omnideck.lab-awake.plist" "$target/automation/macos/dev.omnideck.lab-awake.plist"
 install -m 0644 "$source_dir/hosts/macos-arm64.example.json" "$target/hosts/macos-arm64.example.json"
-source_commit="$(git -C "$source_dir" rev-parse --verify HEAD 2>/dev/null || printf unknown)"
-source_dirty=false
-[[ -z "$(git -C "$source_dir" status --porcelain=v1 --untracked-files=normal 2>/dev/null)" ]] || source_dirty=true
+# An exported source snapshot can live inside an unrelated Git checkout. Only
+# use Git when its resolved worktree root is this source. An empty or corrupt
+# .git directory can otherwise make Git continue looking in parent directories.
+source_commit=unknown
+source_dirty=true
+if [[ -e "$source_dir/.git" ]]; then
+  if source_git_root="$(git -C "$source_dir" rev-parse --show-toplevel 2>/dev/null)" && \
+      [[ "$(realpath -e "$source_git_root")" == "$(realpath -e "$source_dir")" ]] && \
+      source_commit="$(git -C "$source_dir" rev-parse --verify HEAD 2>/dev/null)" && \
+      [[ "$source_commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    if source_status="$(git -C "$source_dir" status --porcelain=v1 --untracked-files=normal 2>/dev/null)"; then
+      [[ -n "$source_status" ]] || source_dirty=false
+    fi
+  else
+    source_commit=unknown
+  fi
+elif [[ -f "$source_dir/SOURCE_COMMIT" ]] && \
+    source_marker="$(cat "$source_dir/SOURCE_COMMIT")" && \
+    [[ "$source_marker" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  source_commit="${source_marker,,}"
+  # The marker identifies the base commit, not whether archived files changed.
+fi
 python3 - "$target/controller-install.json" "$($target/lab.sh --version | awk '{print $2}')" "$source_commit" "$source_dirty" <<'PY'
 import datetime, hashlib, json, os, sys, tempfile
 path, version, commit, dirty = sys.argv[1:]
@@ -68,6 +88,7 @@ installed = [
     "hosts/macos-arm64.example.json",
     "automation/atomic.ks", "automation/configure-firefox-desktop.sh",
     "automation/baselines/onboarding-clean-linux.sh",
+    "automation/baselines/linux-app-state.py",
     "automation/baselines/product-ready-linux.sh",
     "automation/windows/Autounattend.xml",
     "automation/windows/provision.ps1", "cloud-init/appimage-user-data.yaml",

@@ -20,11 +20,11 @@
       "windows": "podman-ready"
     },
     "onboarding-clean": {
-      "appimage": "onboarding-clean-v1",
-      "atomic": "onboarding-clean-v1",
-      "deb": "onboarding-clean-v1",
+      "appimage": "onboarding-clean-v2",
+      "atomic": "onboarding-clean-v2",
+      "deb": "onboarding-clean-v2",
       "macos-arm64": "ready",
-      "rpm": "onboarding-clean-v1",
+      "rpm": "onboarding-clean-v2",
       "windows": "clean"
     },
     "dev-fast": {
@@ -36,11 +36,11 @@
       "windows": "podman-ready"
     },
     "release-clean": {
-      "appimage": "onboarding-clean-v1",
-      "atomic": "onboarding-clean-v1",
-      "deb": "onboarding-clean-v1",
+      "appimage": "onboarding-clean-v2",
+      "atomic": "onboarding-clean-v2",
+      "deb": "onboarding-clean-v2",
       "macos-arm64": "ready",
-      "rpm": "onboarding-clean-v1",
+      "rpm": "onboarding-clean-v2",
       "windows": "clean"
     }
   },

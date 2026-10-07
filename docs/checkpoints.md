@@ -25,6 +25,24 @@ exit
 ./lab.sh provenance capture fedora experiment-v1
 ```
 
+Linux onboarding recipes clear only the disposable tester account’s
+`~/.config/omnideck` and `~/.config/omnideck-cli` directories. Removing Podman
+alone does not clear these files: saved instance and setup metadata can route a
+supposedly new installation into recovery, or refer to data volumes that no
+longer exist. Other user configuration, including the default browser, is kept.
+
+Linux onboarding certification checks that both app-owned paths are absent
+without removing anything. It fails if either path remains or cannot be safely
+inspected. Correct a contaminated baseline by building a new named checkpoint
+inside a lease, applying the onboarding recipe, capturing provenance, and
+certifying it before selecting it in a profile. Keep earlier immutable
+checkpoints for reproducibility; do not patch an accepted golden in place.
+
+The read-only guest check is `python3 linux-app-state.py check`, using the helper
+from `automation/baselines/`. It resolves the disposable `tester` account’s home;
+`--home` is available for isolated filesystem tests. The `clean` action is for
+baseline construction only, never routine preflight or certification.
+
 Provenance capture intentionally runs after the lease releases because it
 refuses running or leased guests.
 
@@ -52,3 +70,8 @@ disk, UEFI, or TPM state changes. Controller, profile, and provisioning-source
 changes do not rewrite or invalidate an unchanged checkpoint record. Validate
 those current inputs with `lab.sh doctor --strict`, then run the exact
 consumer/profile `lab.sh preflight`.
+
+Linux onboarding and release-clean profiles use `onboarding-clean-v2`, certified
+without saved desktop or CLI configuration. Existing `onboarding-clean-v1`
+checkpoints remain available for historical reproduction. Build and certify the
+new checkpoints before using the updated profiles.

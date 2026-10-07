@@ -16,9 +16,10 @@ Neither backend is called directly by operators or consumer scripts.
 `lab.sh lease VM OWNER RUN_ID -- COMMAND...` takes the single lock for a lane,
 records owner metadata under `runtime/leases/`, verifies that the guest was
 stopped while holding the lock, and invokes the command with lease and
-transaction environment variables. Descendants, including QEMU, inherit the
-lock descriptor. Consumer scripts therefore re-execute themselves through the
-lease before checking state or resetting a guest.
+transaction environment variables. The controller keeps the lock descriptor;
+descendant commands, including QEMU, do not inherit it. Consumer scripts
+re-execute themselves through the lease before checking state or resetting a
+guest.
 
 Manual and automated work use the same API. Private `/tmp` lock names are not
 part of the contract.
@@ -62,7 +63,12 @@ storage policy, and deterministic profiles. `install.sh` copies that contract
 and writes `controller-install.json` with the source commit, dirty state, and
 SHA-256 of every installed controller/provisioning file. Consumers require
 controller capabilities and call the metadata-only `preflight` before doing
-expensive work or acquiring a guest.
+expensive work or acquiring a guest. An exported controller snapshot may record
+its base commit in a `SOURCE_COMMIT` file containing a full 40-character Git
+hash. Such installs always report `sourceDirty: true`: the marker does not
+prove that the snapshot matches that commit. Without its own Git metadata or a
+valid marker, an install reports an unknown, dirty source rather than borrowing
+provenance from an enclosing checkout.
 
 `onboarding-clean` provides browser-ready, test-ready operating systems without
 adding mutable runtime prerequisites. `product-ready` adds Podman/WSL/runtime
