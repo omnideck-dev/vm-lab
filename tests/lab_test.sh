@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 -m unittest discover -s "$source_dir/tests" -p "test_*.py"
 test_root="$(mktemp -d)"
 cleanup() { rm -rf -- "$test_root"; }
 trap cleanup EXIT
@@ -55,7 +56,7 @@ for path, baseline, contract in (
     with open(path.replace(".json", ".certification.json"), "w") as handle:
         json.dump({
             "schemaVersion": 2,
-            "contractRevision": 2,
+            "contractRevision": 3 if contract == "onboarding-clean" else 2,
             "vm": "appimage",
             "baseline": baseline,
             "contract": contract,
@@ -66,6 +67,28 @@ PY
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 "$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
+python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v1.certification.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+record = json.load(open(path))
+record["contractRevision"] = 2
+with open(path, "w") as handle:
+    json.dump(record, handle)
+PY
+if "$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json >/dev/null; then
+  printf 'Legacy onboarding certification unexpectedly accepted saved application state risk\n' >&2
+  exit 1
+fi
+"$test_root/lab.sh" preflight desktop product-ready --lanes appimage --json |
+  python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
+python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v1.certification.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+record = json.load(open(path))
+record["contractRevision"] = 3
+with open(path, "w") as handle:
+    json.dump(record, handle)
+PY
 python3 - "$test_root/lab-manifest.json" <<'PY'
 import json, sys
 path = sys.argv[1]

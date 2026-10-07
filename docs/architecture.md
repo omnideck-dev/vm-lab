@@ -62,7 +62,12 @@ storage policy, and deterministic profiles. `install.sh` copies that contract
 and writes `controller-install.json` with the source commit, dirty state, and
 SHA-256 of every installed controller/provisioning file. Consumers require
 controller capabilities and call the metadata-only `preflight` before doing
-expensive work or acquiring a guest.
+expensive work or acquiring a guest. An exported controller snapshot may record
+its base commit in a `SOURCE_COMMIT` file containing a full 40-character Git
+hash. Such installs always report `sourceDirty: true`: the marker does not
+prove that the snapshot matches that commit. Without its own Git metadata or a
+valid marker, an install reports an unknown, dirty source rather than borrowing
+provenance from an enclosing checkout.
 
 `onboarding-clean` provides browser-ready, test-ready operating systems without
 adding mutable runtime prerequisites. `product-ready` adds Podman/WSL/runtime

@@ -24,6 +24,11 @@ if command -v podman >/dev/null 2>&1 && [[ "${VARIANT_ID:-}" != silverblue ]]; t
     exit 1
   }
 fi
+# Historical checkpoints may retain setup state and saved CLI instances even
+# after Podman is removed. This recipe runs only in the disposable tester VM.
+# Certification separately checks these paths without modifying them.
+python3 "$script_dir/linux-app-state.py" clean
+
 test ! -e /opt/omnideck
 test ! -e /usr/local/bin/omnideck
 install -d -m 0755 /var/lib/omnideck-lab

@@ -706,7 +706,7 @@ import datetime, json, os, sys, tempfile
 path, vm, baseline, contract, disk_sha, version = sys.argv[1:]
 record = {
     "schemaVersion": 2,
-    "contractRevision": 2,
+    "contractRevision": 3 if contract == "onboarding-clean" and vm != "windows" else 2,
     "vm": vm,
     "baseline": baseline,
     "contract": contract,
@@ -733,7 +733,8 @@ try:
     with open(provenance_path) as handle:
         provenance = json.load(handle)
     assert record["schemaVersion"] == 2
-    assert record["contractRevision"] == 2
+    expected_revision = 3 if contract == "onboarding-clean" and vm != "windows" else 2
+    assert record["contractRevision"] == expected_revision
     assert record["vm"] == vm
     assert record["baseline"] == baseline
     assert record["contract"] == contract
@@ -776,6 +777,7 @@ build_baseline_one() {
   install -m 0755 "$LAB_ROOT/automation/baselines/$recipe" "$recipe_dir/$recipe"
   if [[ "$profile" == onboarding-clean ]]; then
     install -m 0755 "$LAB_ROOT/automation/configure-firefox-desktop.sh" "$recipe_dir/configure-firefox-desktop.sh"
+    install -m 0755 "$LAB_ROOT/automation/baselines/linux-app-state.py" "$recipe_dir/linux-app-state.py"
   fi
   run_id="baseline-build-${profile}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
   "$0" lease "$vm" baseline-build "$run_id" --cleanup-baseline "$source_baseline" -- \
@@ -809,7 +811,7 @@ certify_baseline_one() {
   fi
   "$0" lease "$vm" baseline-certify "$run_id" --cleanup-baseline "$baseline" -- \
     bash -c 'set -Eeuo pipefail
-      lab="$1"; vm="$2"; baseline="$3"; contract="$4"; password_hash="$5"
+      lab="$1"; vm="$2"; baseline="$3"; contract="$4"; password_hash="$5"; helpers="$6"
       "$lab" reset "$vm" "$baseline"
       "$lab" start "$vm"
       "$lab" wait "$vm"
@@ -830,7 +832,11 @@ certify_baseline_one() {
       elif [[ "$vm" != atomic ]]; then
         "$lab" run "$vm" "! command -v podman >/dev/null"
       fi
-      "$lab" stop "$vm"' _ "$0" "$vm" "$baseline" "$contract" "$password_hash"
+      if [[ "$contract" == onboarding-clean && "$vm" != windows ]]; then
+        "$lab" stage "$vm" "$helpers" /tmp/omnideck-baseline-certification
+        "$lab" run "$vm" python3 /tmp/omnideck-baseline-certification/linux-app-state.py check
+      fi
+      "$lab" stop "$vm"' _ "$0" "$vm" "$baseline" "$contract" "$password_hash" "$LAB_ROOT/automation/baselines"
   write_certification "$vm" "$baseline" "$contract"
   printf '%s/%s satisfies %s.\n' "$vm" "$baseline" "$contract"
 }
