@@ -50,11 +50,14 @@ install -m 0644 "$source_dir/automation/macos/OmnideckLabInput.m" "$target/autom
 install -m 0644 "$source_dir/automation/macos/dev.omnideck.lab-awake.plist" "$target/automation/macos/dev.omnideck.lab-awake.plist"
 install -m 0644 "$source_dir/hosts/macos-arm64.example.json" "$target/hosts/macos-arm64.example.json"
 # An exported source snapshot can live inside an unrelated Git checkout. Only
-# use Git when this controller source has its own .git directory or worktree file.
+# use Git when its resolved worktree root is this source. An empty or corrupt
+# .git directory can otherwise make Git continue looking in parent directories.
 source_commit=unknown
 source_dirty=true
 if [[ -e "$source_dir/.git" ]]; then
-  if source_commit="$(git -C "$source_dir" rev-parse --verify HEAD 2>/dev/null)" && \
+  if source_git_root="$(git -C "$source_dir" rev-parse --show-toplevel 2>/dev/null)" && \
+      [[ "$(realpath -e "$source_git_root")" == "$(realpath -e "$source_dir")" ]] && \
+      source_commit="$(git -C "$source_dir" rev-parse --verify HEAD 2>/dev/null)" && \
       [[ "$source_commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
     if source_status="$(git -C "$source_dir" status --porcelain=v1 --untracked-files=normal 2>/dev/null)"; then
       [[ -n "$source_status" ]] || source_dirty=false

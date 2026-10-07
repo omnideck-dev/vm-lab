@@ -66,6 +66,26 @@ class InstallerSourceTests(unittest.TestCase):
                 self.assertEqual(record["sourceCommit"], "unknown")
                 self.assertTrue(record["sourceDirty"])
 
+    def test_invalid_own_git_metadata_cannot_borrow_outer_repository(self):
+        metadata = self.snapshot / ".git"
+        (self.snapshot / "SOURCE_COMMIT").write_text(ARCHIVE_COMMIT + "\n")
+        for kind in ("empty-directory", "corrupt-directory", "corrupt-file"):
+            with self.subTest(kind=kind):
+                if metadata.is_dir():
+                    shutil.rmtree(metadata)
+                elif metadata.exists():
+                    metadata.unlink()
+                if kind == "corrupt-file":
+                    metadata.write_text("gitdir: /nonexistent/lab-test-git-dir\n")
+                else:
+                    metadata.mkdir()
+                    if kind == "corrupt-directory":
+                        (metadata / "HEAD").write_text("not a git reference\n")
+                record = self.install_record()
+                self.assertEqual(record["sourceCommit"], "unknown")
+                self.assertNotEqual(record["sourceCommit"], self.outer_commit)
+                self.assertTrue(record["sourceDirty"])
+
     def test_own_git_metadata_takes_priority_over_archive_marker(self):
         (self.snapshot / "SOURCE_COMMIT").write_text(ARCHIVE_COMMIT + "\n")
         git(self.snapshot, "init", "--quiet")

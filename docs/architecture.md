@@ -16,9 +16,10 @@ Neither backend is called directly by operators or consumer scripts.
 `lab.sh lease VM OWNER RUN_ID -- COMMAND...` takes the single lock for a lane,
 records owner metadata under `runtime/leases/`, verifies that the guest was
 stopped while holding the lock, and invokes the command with lease and
-transaction environment variables. Descendants, including QEMU, inherit the
-lock descriptor. Consumer scripts therefore re-execute themselves through the
-lease before checking state or resetting a guest.
+transaction environment variables. The controller keeps the lock descriptor;
+descendant commands, including QEMU, do not inherit it. Consumer scripts
+re-execute themselves through the lease before checking state or resetting a
+guest.
 
 Manual and automated work use the same API. Private `/tmp` lock names are not
 part of the contract.
