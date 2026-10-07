@@ -70,3 +70,8 @@ disk, UEFI, or TPM state changes. Controller, profile, and provisioning-source
 changes do not rewrite or invalidate an unchanged checkpoint record. Validate
 those current inputs with `lab.sh doctor --strict`, then run the exact
 consumer/profile `lab.sh preflight`.
+
+Linux onboarding and release-clean profiles use `onboarding-clean-v2`, certified
+without saved desktop or CLI configuration. Existing `onboarding-clean-v1`
+checkpoints remain available for historical reproduction. Build and certify the
+new checkpoints before using the updated profiles.

@@ -23,7 +23,7 @@ cp "$source_dir/hosts/macos-arm64.example.json" "$test_root/hosts/macos-arm64.js
 
 "$test_root/lab.sh" describe ubuntu --json | python3 -c 'import json,sys; assert json.load(sys.stdin)["vm"] == "appimage"'
 "$test_root/lab.sh" baseline ubuntu desktop | grep -Fxq product-ready-v2
-"$test_root/lab.sh" profile release-clean ubuntu | grep -Fxq onboarding-clean-v1
+"$test_root/lab.sh" profile release-clean ubuntu | grep -Fxq onboarding-clean-v2
 "$test_root/lab.sh" describe macos --json | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["kind"] == "host" and data["architecture"] == "arm64"'
 "$test_root/lab.sh" profile onboarding-clean macos | grep -Fxq ready
 touch "$test_root/runtime/fake-host-locked"
@@ -48,7 +48,7 @@ record = {
 }
 for path, baseline, contract in (
     (sys.argv[2], "product-ready-v2", "product-ready"),
-    (sys.argv[2].replace("product-ready-v2", "onboarding-clean-v1"), "onboarding-clean-v1", "onboarding-clean"),
+    (sys.argv[2].replace("product-ready-v2", "onboarding-clean-v2"), "onboarding-clean-v2", "onboarding-clean"),
 ):
     record["baseline"] = baseline
     with open(path, "w") as handle:
@@ -67,7 +67,7 @@ PY
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
 "$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
-python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v1.certification.json" <<'PY'
+python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v2.certification.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 record = json.load(open(path))
@@ -81,7 +81,7 @@ if "$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json >/
 fi
 "$test_root/lab.sh" preflight desktop product-ready --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
-python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v1.certification.json" <<'PY'
+python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v2.certification.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 record = json.load(open(path))
@@ -113,7 +113,7 @@ with open(path, "w") as handle:
 PY
 "$test_root/lab.sh" preflight cli onboarding-clean --lanes appimage --json |
   python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"] is True'
-python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v1.json" <<'PY'
+python3 - "$test_root/golden/manifests/appimage-onboarding-clean-v2.json" <<'PY'
 import json, sys
 path = sys.argv[1]
 with open(path) as handle:

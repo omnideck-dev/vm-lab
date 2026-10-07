@@ -32,4 +32,4 @@ python3 "$script_dir/linux-app-state.py" clean
 test ! -e /opt/omnideck
 test ! -e /usr/local/bin/omnideck
 install -d -m 0755 /var/lib/omnideck-lab
-printf 'onboarding-clean-v1\n' > /var/lib/omnideck-lab/baseline-contract
+printf 'onboarding-clean-v2\n' > /var/lib/omnideck-lab/baseline-contract
